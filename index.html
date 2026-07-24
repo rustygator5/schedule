@@ -279,10 +279,8 @@
   <div class="modal">
     <h2 id="actTitle">Add activity</h2>
     <div class="body">
-      <div class="row2">
-        <div class="field"><label>Child</label><select id="fKid"></select></div>
-        <div class="field"><label>Activity</label><input type="text" id="fName" placeholder="Soccer practice" autocomplete="off"></div>
-      </div>
+      <div class="field"><label>Children</label><div class="dowpick" id="fKids"></div><div class="hint">Tap everyone who goes on this trip (carpools share one ride).</div></div>
+      <div class="field"><label>Activity</label><input type="text" id="fName" placeholder="Soccer practice" autocomplete="off"></div>
       <div class="field">
         <label>Location</label>
         <div class="selrow">
@@ -435,7 +433,7 @@ function defaultState(){
   return { title:"Our Family", buffer:15, dayStart:390, dayEnd:1320, gasPrice:3.20, dieselPrice:3.60,
            kids:[], drivers:[], places:[], vehicles:[], acts:[], distCache:{}, updatedAt:0 };
 }
-let ui = { view:"week", filter:"all", editingId:null, editDow:1, editRepeat:"weekly",
+let ui = { view:"week", filter:"all", editingId:null, editDow:1, editRepeat:"weekly", editKidIds:[],
            weekStart:mondayOf(new Date()), flashIds:[] };
 
 /* ---------- time / date helpers ---------- */
@@ -468,7 +466,7 @@ function activeOnDate(a, date){
 function passFilter(a){
   if(ui.filter==="all") return true;
   const [t,id]=ui.filter.split(":");
-  if(t==="kid") return a.kidId===id;
+  if(t==="kid") return (a.kidIds||[]).includes(id);
   return a.trans && (a.dropId===id||a.pickId===id);
 }
 
@@ -483,6 +481,12 @@ function placeName(id){ const p=placeById(id); return p?p.name:""; }
 function placeAddr(id){ const p=placeById(id); return p?p.address:""; }
 function driverHomeId(dId){ const d=drvById(dId); return d?d.homePlaceId:""; }
 function vehForLeg(act, driverId){ if(act.vehicleId) return act.vehicleId; const d=drvById(driverId); return d&&d.usualVehicleId?d.usualVehicleId:""; }
+function actKids(a){ return (a.kidIds||[]).map(kidById).filter(Boolean); }
+function actKidNames(a){ const ks=actKids(a); return ks.length? ks.map(k=>k.name).join(" & ") : "?"; }
+function actGradient(a){ const ks=actKids(a); if(!ks.length) return "#888"; if(ks.length===1) return ks[0].color;
+  const n=ks.length, st=[]; ks.forEach((k,i)=>{ st.push(k.color+" "+Math.round(i*100/n)+"%", k.color+" "+Math.round((i+1)*100/n)+"%"); });
+  return "linear-gradient(135deg,"+st.join(",")+")"; }
+function kidDotsHtml(a){ return actKids(a).map(k=>`<span class="kiddot" style="background:${k.color}" title="${esc(k.name)}"></span>`).join(""); }
 
 /* ---------- fuel ---------- */
 function mostEfficient(){ const vs=state.vehicles.filter(v=>v.mpg>0); if(!vs.length) return null;
@@ -527,6 +531,7 @@ function repAddrs(act){
   return {oAddr,dAddr};
 }
 function cachedMiles(oAddr,dAddr){ const v=state.distCache[pairKey(oAddr,dAddr)]; return typeof v==="number"?v:null; }
+function cachedMilesSym(a,b){ if(!a||!b) return null; const v=cachedMiles(a,b); if(v!=null) return v; return cachedMiles(b,a); }
 function autoMilesFor(act){ const ra=repAddrs(act); if(!ra) return null; return cachedMiles(ra.oAddr,ra.dAddr); }
 function effectiveMiles(act){ if(act.distMiles!=null) return act.distMiles; const am=autoMilesFor(act); return am!=null?am:0; }
 
@@ -554,22 +559,68 @@ function cheaperAlt(v, miles, chosenCost){
   if(best && best.id!==v.id && bestCost<chosenCost-0.005) return best.name+" saves ~"+money(chosenCost-bestCost);
   return "";
 }
-/* one line: round-trip cost + gallons + car, plus a savings nudge on long trips. "" if not computable */
-function costLine(act, driverId){
-  const miles=effectiveMiles(act); if(!miles) return "";
-  const v=effVehicle(act,driverId); const rt=roundTrip(v,miles); if(!rt) return "";
-  let s;
-  if(v.fuel==="Electric") s=`⚡ ${esc(v.name)} · no gas cost`;
-  else if(rt.cost==null)  s=`⛽ ${rt.gal.toFixed(1)} gal round trip · ${esc(v.name)}`;
-  else                    s=`⛽ ~${money(rt.cost)} round trip · ${rt.gal.toFixed(1)} gal · ${esc(v.name)}`;
-  const alt=cheaperAlt(v,miles,rt.cost);
-  if(alt) s += ` <span class="save">· ${esc(alt)}</span>`;
-  return `<div class="vehline">${s}</div>`;
+/* Per-leg economy. A leg = one drive there-and-back (drop OR pick), using that
+   leg's own driver, home, vehicle and distance. Returns null if not computable. */
+function legInfo(act, side){
+  const drvId = side==="drop"? act.dropId : act.pickId;
+  if(!drvId) return null;
+  const homeId = side==="drop"? (act.dropFromId||driverHomeId(act.dropId)) : (act.pickToId||driverHomeId(act.pickId));
+  const homeAddr=placeAddr(homeId), placeA=placeAddr(act.placeId);
+  const miles = (act.distMiles!=null)? act.distMiles : cachedMilesSym(homeAddr, placeA);
+  const v = effVehicle(act, drvId);
+  const rt = (miles!=null && v)? roundTrip(v, miles) : null;
+  return { side, drvId, miles, v, rt };
+}
+/* Whole-activity economy = drop leg + pick leg (both legs counted). */
+function activityEconomy(act){
+  if(!act.trans) return null;
+  const legs=[legInfo(act,"drop"), legInfo(act,"pick")].filter(Boolean);
+  if(!legs.length) return null;
+  let cost=0, gal=0, anyCost=false; const vehs=[];
+  legs.forEach(l=>{ if(l.rt){ gal+=l.rt.gal; if(l.rt.cost!=null){ cost+=l.rt.cost; anyCost=true; } }
+    if(l.v && !vehs.some(x=>x.id===l.v.id)) vehs.push(l.v); });
+  return { legs, trips:legs.length, cost:anyCost?cost:null, gal, vehs };
+}
+/* Format an economy summary (vehicle names esc'd; HTML-safe). "" if nothing to show. */
+function fmtEconomy(cost, gal, vehs, label){
+  const vl = vehs.map(v=>esc(v.name)).join(" + ");
+  if(cost==null){
+    if(vehs.length && vehs.every(v=>v.fuel==="Electric")) return `⚡ ${vl} · no gas cost`;
+    if(gal>0) return `⛽ ${gal.toFixed(1)} gal ${label}${vl?` · ${vl}`:""}`;
+    return "";
+  }
+  return `⛽ ~${money(cost)} ${label} · ${gal.toFixed(1)} gal${vl?` · ${vl}`:""}`;
+}
+/* Savings nudge for the activity, based on its longest leg. Plain string or "". */
+function activitySavings(act){
+  const e=activityEconomy(act); if(!e) return "";
+  let rep=null; e.legs.forEach(l=>{ if(l.v && l.miles!=null && (!rep || l.miles>rep.miles)) rep=l; });
+  if(!rep) return "";
+  return cheaperAlt(rep.v, rep.miles, rep.rt?rep.rt.cost:null);
+}
+function activityCostLine(act){
+  const e=activityEconomy(act); if(!e) return "";
+  const body=fmtEconomy(e.cost, e.gal, e.vehs, e.trips>1?"both trips":"round trip");
+  if(!body) return "";
+  const alt=activitySavings(act);
+  return `<div class="vehline">${body}${alt?` <span class="save">· ${esc(alt)}</span>`:""}</div>`;
+}
+function legCostLine(act, side){
+  const l=legInfo(act, side); if(!l||!l.v) return "";
+  const body=fmtEconomy(l.rt?l.rt.cost:null, l.rt?l.rt.gal:0, [l.v], "round trip");
+  if(!body) return "";
+  const alt=(l.miles!=null)? cheaperAlt(l.v, l.miles, l.rt?l.rt.cost:null) : "";
+  return `<div class="vehline">${body}${alt?` <span class="save">· ${esc(alt)}</span>`:""}</div>`;
 }
 function weeklyGasCost(){
+  const drvFilter = ui.filter.startsWith("drv:")? ui.filter.split(":")[1] : null;
   const dates=weekDates(ui.weekStart); let total=0, any=false;
   dates.forEach(dt=> state.acts.forEach(a=>{ if(!activeOnDate(a,dt)||!passFilter(a)||!a.trans) return;
-    const rt=roundTrip(effVehicle(a,null), effectiveMiles(a)); if(rt&&rt.cost!=null){ total+=rt.cost; any=true; } }));
+    if(drvFilter){ // only the legs this driver actually drives
+      ["drop","pick"].forEach(side=>{ const drvId=side==="drop"?a.dropId:a.pickId; if(drvId!==drvFilter) return;
+        const l=legInfo(a,side); if(l&&l.rt&&l.rt.cost!=null){ total+=l.rt.cost; any=true; } });
+    }else{ const e=activityEconomy(a); if(e&&e.cost!=null){ total+=e.cost; any=true; } }
+  }));
   return any? total : null;
 }
 
@@ -616,15 +667,21 @@ async function computeAllDistances(){
   if(!mapsKey()){ say("Paste your API key in the box above first."); toast("Add your Google Maps key first"); return; }
   const transActs=state.acts.filter(a=>a.trans);
   if(!transActs.length){ say("No activities need a ride yet — nothing to calculate."); toast("No ride-needing activities"); return; }
-  // build jobs and record WHY any are skipped
+  // build jobs (both drop + pick legs) and record WHY any are skipped
   const seen=new Set(), jobs=[]; let missHome=0, missPlace=0;
   transActs.forEach(a=>{
-    const homeId = a.dropId ? (a.dropFromId||driverHomeId(a.dropId)) : (a.pickToId||driverHomeId(a.pickId));
-    const oAddr=placeAddr(homeId), dAddr=placeAddr(a.placeId);
-    if(!(a.dropId||a.pickId) || !oAddr){ missHome++; return; }
-    if(!dAddr){ missPlace++; return; }
-    const k=pairKey(oAddr,dAddr);
-    if(cachedMiles(oAddr,dAddr)==null && !seen.has(k)){ seen.add(k); jobs.push({oAddr,dAddr}); }
+    const placeA=placeAddr(a.placeId);
+    if(!placeA){ missPlace++; return; }
+    let anyLeg=false;
+    ["drop","pick"].forEach(side=>{
+      const drvId=side==="drop"?a.dropId:a.pickId; if(!drvId) return;
+      const homeId=side==="drop"?(a.dropFromId||driverHomeId(a.dropId)):(a.pickToId||driverHomeId(a.pickId));
+      const homeA=placeAddr(homeId); if(!homeA) return;
+      anyLeg=true;
+      const oAddr=side==="drop"?homeA:placeA, dAddr=side==="drop"?placeA:homeA;
+      if(cachedMilesSym(oAddr,dAddr)==null){ const k=pairKey(oAddr,dAddr); if(!seen.has(k)){ seen.add(k); jobs.push({oAddr,dAddr}); } }
+    });
+    if(!anyLeg) missHome++;
   });
   if(!jobs.length){
     if(missHome||missPlace){
@@ -706,7 +763,9 @@ function normalize(s){
     const np={id:rid("p"),name:nm,address:"",isHome:false}; places.push(np); return np.id; }
   const acts=Array.isArray(s.acts)?s.acts.map(a=>{
     let placeId=a.placeId||""; if(!placeId && a.loc) placeId=placeIdForName(a.loc);
-    return { id:a.id||rid("a"), kidId:a.kidId||"", name:a.name||"Activity", placeId,
+    return { id:a.id||rid("a"),
+      kidIds: Array.isArray(a.kidIds)? a.kidIds.filter(x=>typeof x==="string") : (a.kidId?[a.kidId]:[]),
+      name:a.name||"Activity", placeId,
       repeat:a.repeat==="once"?"once":"weekly", day:clamp(a.day||0,0,6),
       date:a.date||"", startDate:a.startDate||"", endDate:a.endDate||"",
       start:a.start||960, end:a.end||1020, trans:a.trans!==false,
@@ -735,9 +794,10 @@ function computeConflicts(weekStart){
     // 1. Child double-booked
     for(let i=0;i<acts.length;i++) for(let j=i+1;j<acts.length;j++){
       const a=acts[i],b=acts[j];
-      if(a.kidId&&a.kidId===b.kidId && overlaps(a.start,a.end,b.start,b.end)){
+      const shared=(a.kidIds||[]).filter(id=>(b.kidIds||[]).includes(id));
+      if(shared.length && overlaps(a.start,a.end,b.start,b.end)){
         out.push({sev:"danger",ic:"⛔",cat:"Child double-booked",
-          msg:kidName(a.kidId)+" has two activities at once "+dayLabel,
+          msg:shared.map(kidName).join(" & ")+" has two activities at once "+dayLabel,
           sub:a.name+" ("+label12(a.start)+") overlaps "+b.name+" ("+label12(b.start)+")",
           ids:[a.id,b.id]});
       }
@@ -745,8 +805,8 @@ function computeConflicts(weekStart){
     // transport events
     const T=[];
     acts.forEach(a=>{ if(!a.trans) return;
-      T.push({actId:a.id,kidId:a.kidId,type:"drop",driverId:a.dropId,t:a.start,loc:a.placeId,name:a.name});
-      T.push({actId:a.id,kidId:a.kidId,type:"pick",driverId:a.pickId,t:a.end,loc:a.placeId,name:a.name});
+      T.push({actId:a.id,kids:actKidNames(a),type:"drop",driverId:a.dropId,t:a.start,loc:a.placeId,name:a.name});
+      T.push({actId:a.id,kids:actKidNames(a),type:"pick",driverId:a.pickId,t:a.end,loc:a.placeId,name:a.name});
     });
     const win=e=>[e.t-buf,e.t+buf];
 
@@ -790,7 +850,7 @@ function computeConflicts(weekStart){
       if(miss.length){ seenUnassigned.add(a.id);
         out.push({sev:"warn",ic:"❓",cat:"Ride not assigned",
           msg:a.name+" — no "+miss.join(" or ")+" driver",
-          sub:kidName(a.kidId)+" · "+(a.repeat==="once"?fmtDateFull(date):DOW_FULL[a.day])+" "+label12(a.start)+(a.placeId?" · "+placeName(a.placeId):""),
+          sub:actKidNames(a)+" · "+(a.repeat==="once"?fmtDateFull(date):DOW_FULL[a.day])+" "+label12(a.start)+(a.placeId?" · "+placeName(a.placeId):""),
           ids:[a.id]});
       }
     });
@@ -798,7 +858,7 @@ function computeConflicts(weekStart){
   const order={danger:0,warn:1}; out.sort((x,y)=>order[x.sev]-order[y.sev]);
   return out;
 }
-function verbText(e){ return (e.type==="drop"?"drop off ":"pick up ")+kidName(e.kidId); }
+function verbText(e){ return (e.type==="drop"?"drop off ":"pick up ")+e.kids; }
 
 /* ================= RENDER ================= */
 function render(){
@@ -888,9 +948,8 @@ function renderWeek(){
     dayActs.forEach(a=>{
       const top=(clamp(a.start,ds,de)-ds)*PXMIN;
       const h=Math.max((clamp(a.end,ds,de)-clamp(a.start,ds,de))*PXMIN, 26);
-      const k=kidById(a.kidId); const color=k?k.color:"#888";
       const info=packed[a.id]; const wpct=100/info.n; const left=info.i*wpct;
-      col+=`<div class="ev" data-id="${a.id}" style="top:${top}px;height:${h}px;background:${color};
+      col+=`<div class="ev" data-id="${a.id}" style="top:${top}px;height:${h}px;background:${actGradient(a)};
         left:calc(${left}% + 2px);width:calc(${wpct}% - 4px)">
         ${warnBadge(a)}
         <div class="en">${esc(a.name)}</div>
@@ -974,7 +1033,6 @@ function recurLabel(a){
   return wd+" · weekly";
 }
 function activityCard(a){
-  const k=kidById(a.kidId); const color=k?k.color:"#888";
   const pname=placeName(a.placeId), addr=placeAddr(a.placeId);
   let trans;
   if(a.trans){
@@ -986,12 +1044,12 @@ function activityCard(a){
   const url=dirUrl(origAddr,addr);
   const dir=addr?`<a class="dirbtn" href="${url}" target="_blank" rel="noopener">🧭 Directions</a>`:"";
   const em=effectiveMiles(a); const distLine=em>0?`<div class="vehline">📏 ${em} mi one-way${a.distMiles==null?" (auto)":""}</div>`:"";
-  const cl=costLine(a,null); const v0=effVehicle(a,null);
+  const cl=activityCostLine(a); const v0=effVehicle(a,null);
   const vehFallback=(!cl&&v0)?`<div class="vehline">🚗 ${esc(v0.name)}${v0.mpg?` · ${v0.mpg} mpg`:""}</div>`:"";
   return `<div class="acard" data-id="${a.id}">
     <div class="atime">${label12(a.start)}<small>${label12(a.end)}</small></div>
     <div class="abody">
-      <div><span class="akid"><span class="kiddot" style="background:${color}"></span>${esc(kidName(a.kidId))}</span><span class="aname">${esc(a.name)}</span></div>
+      <div><span class="akid">${kidDotsHtml(a)} ${esc(actKidNames(a))}</span><span class="aname">${esc(a.name)}</span></div>
       <div class="aloc" style="text-transform:none">${esc(recurLabel(a))}</div>
       ${pname?`<div class="aloc">📍 ${esc(pname)}${addr?" — "+esc(addr):""}</div>`:""}
       ${a.notes?`<div class="aloc">📝 ${esc(a.notes)}</div>`:""}
@@ -1001,24 +1059,23 @@ function activityCard(a){
 }
 function driverTaskCard(it){
   const a=it.a; const drop=it.type==="drop"; const driverId=drop?a.dropId:a.pickId;
-  const k=kidById(a.kidId); const color=k?k.color:"#888";
   const homeId=driverHomeId(driverId);
   const origId=drop?(a.dropFromId||homeId):a.placeId;
   const destId=drop?a.placeId:(a.pickToId||homeId);
   const origAddr=placeAddr(origId), destAddr=placeAddr(destId);
   const verb=drop?`<span class="verb drop">Drop off</span>`:`<span class="verb pick">Pick up</span>`;
-  const line=drop?`Get <b>${esc(kidName(a.kidId))}</b> to <b>${esc(a.name)}</b>`:`Collect <b>${esc(kidName(a.kidId))}</b> from <b>${esc(a.name)}</b>`;
+  const line=drop?`Get <b>${esc(actKidNames(a))}</b> to <b>${esc(a.name)}</b>`:`Collect <b>${esc(actKidNames(a))}</b> from <b>${esc(a.name)}</b>`;
   const when=drop?`Arrive by ${label12(a.start)}`:`Ready at ${label12(a.end)}`;
   const route=(origId||destId)?`<div class="tmeta">${esc(placeName(origId)||"—")} → <b>${esc(placeName(destId)||"—")}</b></div>`:"";
   const em=effectiveMiles(a); const distLine=em>0?`<div class="vehline">📏 ${em} mi one-way${a.distMiles==null?" (auto)":""}</div>`:"";
-  const cl=costLine(a,driverId); const vObj=effVehicle(a,driverId);
+  const cl=legCostLine(a, drop?"drop":"pick"); const vObj=effVehicle(a,driverId);
   const vehFallback=(!cl&&vObj)?`<div class="vehline">🚗 ${esc(vObj.name)}${vObj.mpg?` · ${vObj.mpg} mpg`:""}</div>`:"";
   const url=dirUrl(origAddr,destAddr);
   const dir=url?`<a class="dirbtn" href="${url}" target="_blank" rel="noopener">🧭 Directions</a>`:"";
   return `<div class="acard taskcard" data-id="${a.id}">
     <div class="atime">${label12(it.t)}</div>
     <div class="abody">
-      <div class="big">${verb}<span class="kiddot" style="background:${color}"></span> ${line}</div>
+      <div class="big">${verb}${kidDotsHtml(a)} ${line}</div>
       <div class="tmeta">${when}${destAddr?` · 📍 ${esc(destAddr)}`:(placeName(destId)?` · 📍 ${esc(placeName(destId))}`:"")}</div>
       ${route}${distLine}${cl||vehFallback}
       ${a.notes?`<div class="tmeta">📝 ${esc(a.notes)}</div>`:""}
@@ -1068,9 +1125,8 @@ function openAct(id){
   ui.editingId=id;
   const a=id?state.acts.find(x=>x.id===id):null;
   document.getElementById("actTitle").textContent=a?"Edit activity":"Add activity";
-  const kSel=document.getElementById("fKid");
-  kSel.innerHTML=state.kids.map(k=>`<option value="${k.id}">${esc(k.name)}</option>`).join("");
-  kSel.value=a?a.kidId:state.kids[0].id;
+  ui.editKidIds = a? (a.kidIds||[]).slice() : (state.kids.length?[state.kids[0].id]:[]);
+  renderKidChips();
   document.getElementById("fName").value=a?a.name:"";
   fillPlaceSelect(document.getElementById("fPlace"), a?a.placeId:"", "none");
   hideNewPlace();
@@ -1095,6 +1151,16 @@ function openAct(id){
   showOverlay("ovAct");
   setTimeout(()=>document.getElementById("fName").focus(),50);
 }
+function renderKidChips(){
+  const wrap=document.getElementById("fKids");
+  wrap.innerHTML=state.kids.map(k=>{ const on=ui.editKidIds.includes(k.id);
+    return `<button type="button" data-k="${k.id}" class="${on?"on":""}" style="${on?`background:${k.color};border-color:${k.color};color:#fff`:""}">${esc(k.name)}</button>`; }).join("");
+  [...wrap.querySelectorAll("button")].forEach(b=>b.onclick=()=>{
+    const id=b.dataset.k, i=ui.editKidIds.indexOf(id);
+    if(i>=0) ui.editKidIds.splice(i,1); else ui.editKidIds.push(id);
+    renderKidChips();
+  });
+}
 function renderDow(){
   document.getElementById("fDow").innerHTML=DOW.map((d,i)=>`<button type="button" data-d="${i}" class="${i===ui.editDow?"on":""}">${d}</button>`).join("");
   [...document.querySelectorAll("#fDow button")].forEach(b=>b.onclick=()=>{ ui.editDow=+b.dataset.d; renderDow(); });
@@ -1113,20 +1179,19 @@ function modalMiles(){
   const ra=modalRepAddrs(); if(ra){ const m=cachedMiles(ra.oAddr,ra.dAddr); if(m!=null) return m; }
   return 0;
 }
+function modalAct(){
+  const m=val("fDist").trim();
+  return { trans:document.getElementById("fTrans").checked, placeId:val("fPlace"),
+    dropId:val("fDrop"), pickId:val("fPick"), dropFromId:val("fDropFrom"), pickToId:val("fPickTo"),
+    vehicleId:val("fVeh"), distMiles: m===""?null:(+m||0) };
+}
 function updateFuelHint(){
   const el=document.getElementById("fFuelHint");
-  const miles=modalMiles();
-  const vId=val("fVeh")||(function(){ const d=drvById(val("fDrop")||val("fPick")); return d?d.usualVehicleId:""; })();
-  const v=vId?vehById(vId):null; const rt=roundTrip(v,miles);
+  const e=activityEconomy(modalAct());
   let txt="";
-  if(rt){
-    if(v.fuel==="Electric") txt="⚡ "+v.name+" · no gas cost";
-    else if(rt.cost==null)  txt="≈ "+rt.gal.toFixed(1)+" gal round trip in "+v.name;
-    else                    txt="≈ "+money(rt.cost)+" round trip · "+rt.gal.toFixed(1)+" gal in "+v.name;
-    const alt=cheaperAlt(v,miles,rt.cost);
-    if(alt) txt+=" — "+alt;
-  }
-  if(txt){ el.textContent=txt; el.style.display=""; } else el.style.display="none";
+  if(e){ txt=fmtEconomy(e.cost, e.gal, e.vehs, e.trips>1?"both trips":"round trip");
+    const alt=activitySavings(modalAct()); if(txt&&alt) txt+=" — "+esc(alt); }
+  if(txt){ el.innerHTML=txt; el.style.display=""; } else el.style.display="none";
 }
 function refreshAutoDistHint(){
   const el=document.getElementById("fAutoVal"); if(!el) return;
@@ -1181,7 +1246,8 @@ function saveAct(){
   }
   const distRaw=document.getElementById("fDist").value.trim();
   const distMiles=distRaw===""?null:(isFinite(+distRaw)&&+distRaw>=0?+distRaw:null);
-  const rec={ kidId:document.getElementById("fKid").value, name, placeId:document.getElementById("fPlace").value,
+  if(!ui.editKidIds.length){ toast("Pick at least one child"); return; }
+  const rec={ kidIds:ui.editKidIds.slice(), name, placeId:document.getElementById("fPlace").value,
     repeat, day, date, startDate, endDate, start, end,
     trans:document.getElementById("fTrans").checked,
     dropId:document.getElementById("fDrop").value, pickId:document.getElementById("fPick").value,
@@ -1288,9 +1354,11 @@ function addVeh(){ state.vehicles.push({id:rid("v"),name:"",mpg:0,fuel:"Gas"});
   saveLocal(); renderManage(); render(); focusLast("vehList"); }
 function removePerson(kind,id){
   if(kind==="kid"){
-    const n=state.acts.filter(a=>a.kidId===id).length;
-    if(n && !confirm(`Delete this child and their ${n} activit${n===1?"y":"ies"}?`)) return;
-    state.kids=state.kids.filter(k=>k.id!==id); state.acts=state.acts.filter(a=>a.kidId!==id);
+    const n=state.acts.filter(a=>(a.kidIds||[]).includes(id)).length;
+    if(n && !confirm(`Remove this child from ${n} activit${n===1?"y":"ies"}? Any activity left with no child is deleted.`)) return;
+    state.kids=state.kids.filter(k=>k.id!==id);
+    state.acts.forEach(a=>{ a.kidIds=(a.kidIds||[]).filter(x=>x!==id); });
+    state.acts=state.acts.filter(a=>(a.kidIds||[]).length>0);
   }else{
     state.drivers=state.drivers.filter(d=>d.id!==id);
     state.acts.forEach(a=>{ if(a.dropId===id)a.dropId=""; if(a.pickId===id)a.pickId=""; });
