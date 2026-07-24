@@ -145,6 +145,7 @@
     color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;font-weight:700}
   .dirbtn:hover{background:var(--panel)}
   .vehline{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .vehline .save{color:var(--ok);font-weight:700}
   .fuelhint{font-size:12px;color:var(--warn);font-weight:600;margin-top:4px;display:flex;align-items:center;gap:5px}
   /* driver task card */
   .taskcard .big{font-weight:800;font-size:15px}
@@ -358,6 +359,14 @@
       <div class="msec"><div class="subhead">Places &amp; addresses <span class="lt">— homes and activity locations</span></div><div class="mlist" id="placeList"></div><button class="btn sm" id="addPlace">＋ Add place</button></div>
       <div class="msec"><div class="subhead">Vehicles <span class="lt">— name + MPG for fuel-smart trips</span></div><div class="mlist" id="vehList"></div><button class="btn sm" id="addVeh">＋ Add vehicle</button></div>
       <div class="msec">
+        <div class="subhead">Fuel prices <span class="lt">— for trip cost estimates</span></div>
+        <div class="row2">
+          <div class="field"><label>Regular gas ($/gal)</label><input type="text" inputmode="decimal" id="gasPriceInput" placeholder="3.20" autocomplete="off"></div>
+          <div class="field"><label>Diesel ($/gal)</label><input type="text" inputmode="decimal" id="dieselPriceInput" placeholder="3.60" autocomplete="off"></div>
+        </div>
+        <div class="hint">Applied by each vehicle's fuel type; electric vehicles show no gas cost. Editable estimate — set these to your local prices.</div>
+      </div>
+      <div class="msec">
         <div class="subhead">Auto-distances <span class="lt">— Google Maps (optional)</span></div>
         <div class="field"><label>Google Maps API key</label>
           <input type="text" id="mapsKeyInput" class="mono" placeholder="Paste your key — saved only on this device" autocomplete="off"></div>
@@ -423,7 +432,7 @@ const LS_KEY = "familySchedule.data." + SCHED_ID;
 /* ---------- state ---------- */
 let state = defaultState();
 function defaultState(){
-  return { title:"Our Family", buffer:15, dayStart:390, dayEnd:1320,
+  return { title:"Our Family", buffer:15, dayStart:390, dayEnd:1320, gasPrice:3.20, dieselPrice:3.60,
            kids:[], drivers:[], places:[], vehicles:[], acts:[], distCache:{}, updatedAt:0 };
 }
 let ui = { view:"week", filter:"all", editingId:null, editDow:1, editRepeat:"weekly",
@@ -520,6 +529,49 @@ function repAddrs(act){
 function cachedMiles(oAddr,dAddr){ const v=state.distCache[pairKey(oAddr,dAddr)]; return typeof v==="number"?v:null; }
 function autoMilesFor(act){ const ra=repAddrs(act); if(!ra) return null; return cachedMiles(ra.oAddr,ra.dAddr); }
 function effectiveMiles(act){ if(act.distMiles!=null) return act.distMiles; const am=autoMilesFor(act); return am!=null?am:0; }
+
+/* ---------- trip cost ($) ---------- */
+function money(n){ return "$"+(Math.round(n*100)/100).toFixed(2); }
+function priceForFuel(fuel){ if(fuel==="Diesel") return +state.dieselPrice||0; if(fuel==="Electric") return 0; return +state.gasPrice||0; }
+function effVehicle(act, driverId){
+  const vId = act.vehicleId || (driverId ? vehForLeg(act,driverId)
+    : (function(){ const d=drvById(act.dropId||act.pickId); return d?d.usualVehicleId:""; })());
+  return vId ? vehById(vId) : null;
+}
+function roundTrip(v, miles){ if(!v||!v.mpg||!miles) return null;
+  const gal=(miles*2)/v.mpg, p=priceForFuel(v.fuel); return {gal, price:p, cost: p? gal*p : null}; }
+/* On a long trip, suggest a cheaper option: prefer an EV ("no gas"),
+   else the lowest gas-cost vehicle in the fleet. Returns a plain string or "". */
+function cheaperAlt(v, miles, chosenCost){
+  if(!v || miles<LONG_TRIP_MI) return "";
+  if(v.fuel!=="Electric"){
+    const evs=state.vehicles.filter(x=>x.fuel==="Electric"&&x.mpg>0).sort((a,b)=>b.mpg-a.mpg);
+    if(evs.length) return evs[0].name+" would use no gas";
+  }
+  if(chosenCost==null) return "";
+  let best=null,bestCost=Infinity;
+  state.vehicles.forEach(x=>{ const rt=roundTrip(x,miles); if(rt&&rt.cost!=null&&rt.cost<bestCost){ bestCost=rt.cost; best=x; } });
+  if(best && best.id!==v.id && bestCost<chosenCost-0.005) return best.name+" saves ~"+money(chosenCost-bestCost);
+  return "";
+}
+/* one line: round-trip cost + gallons + car, plus a savings nudge on long trips. "" if not computable */
+function costLine(act, driverId){
+  const miles=effectiveMiles(act); if(!miles) return "";
+  const v=effVehicle(act,driverId); const rt=roundTrip(v,miles); if(!rt) return "";
+  let s;
+  if(v.fuel==="Electric") s=`⚡ ${esc(v.name)} · no gas cost`;
+  else if(rt.cost==null)  s=`⛽ ${rt.gal.toFixed(1)} gal round trip · ${esc(v.name)}`;
+  else                    s=`⛽ ~${money(rt.cost)} round trip · ${rt.gal.toFixed(1)} gal · ${esc(v.name)}`;
+  const alt=cheaperAlt(v,miles,rt.cost);
+  if(alt) s += ` <span class="save">· ${esc(alt)}</span>`;
+  return `<div class="vehline">${s}</div>`;
+}
+function weeklyGasCost(){
+  const dates=weekDates(ui.weekStart); let total=0, any=false;
+  dates.forEach(dt=> state.acts.forEach(a=>{ if(!activeOnDate(a,dt)||!passFilter(a)||!a.trans) return;
+    const rt=roundTrip(effVehicle(a,null), effectiveMiles(a)); if(rt&&rt.cost!=null){ total+=rt.cost; any=true; } }));
+  return any? total : null;
+}
 
 let gmapsPromise=null;
 function mapsKey(){ try{ return localStorage.getItem("familySchedule.gmapsKey")||""; }catch(e){ return ""; } }
@@ -663,6 +715,8 @@ function normalize(s){
   }):[];
   return { title:s.title||d.title, buffer:Number.isFinite(s.buffer)?s.buffer:d.buffer,
     dayStart:s.dayStart||d.dayStart, dayEnd:s.dayEnd||d.dayEnd,
+    gasPrice:(s.gasPrice!=null&&isFinite(+s.gasPrice))?+s.gasPrice:d.gasPrice,
+    dieselPrice:(s.dieselPrice!=null&&isFinite(+s.dieselPrice))?+s.dieselPrice:d.dieselPrice,
     kids, drivers, places, vehicles, acts,
     distCache:(s.distCache&&typeof s.distCache==="object")?s.distCache:{}, updatedAt:s.updatedAt||0 };
 }
@@ -776,7 +830,7 @@ function actsThisWeek(){ const dates=weekDates(ui.weekStart); const set=new Set(
   dates.forEach(dt=>state.acts.forEach(a=>{ if(activeOnDate(a,dt)&&passFilter(a)) set.add(a.id); })); return set.size; }
 function renderFilterInfo(){
   const el=document.getElementById("filterinfo"); const n=actsThisWeek();
-  const wk=`<b>${n}</b> this week`;
+  const gc=weeklyGasCost(); const wk=`<b>${n}</b> this week${gc!=null?` · ~${money(gc)} gas`:""}`;
   if(ui.filter==="all"){ el.innerHTML=`${wk} · <b>${state.kids.length}</b> kid${state.kids.length===1?"":"s"}`; return; }
   const [t,id]=ui.filter.split(":");
   if(t==="kid") el.innerHTML=`<b>${esc(kidName(id))}</b> · ${wk}`;
@@ -931,10 +985,9 @@ function activityCard(a){
   const origAddr=a.trans?placeAddr(a.dropFromId||driverHomeId(a.dropId)):"";
   const url=dirUrl(origAddr,addr);
   const dir=addr?`<a class="dirbtn" href="${url}" target="_blank" rel="noopener">🧭 Directions</a>`:"";
-  const veh=(a.vehicleId&&vehById(a.vehicleId));
-  const vehLine=veh?`<div class="vehline">🚗 ${esc(veh.name)}${veh.mpg?` · ${veh.mpg} mpg`:""}</div>`:"";
   const em=effectiveMiles(a); const distLine=em>0?`<div class="vehline">📏 ${em} mi one-way${a.distMiles==null?" (auto)":""}</div>`:"";
-  const fh=fuelHintFor(a); const fuel=fh?`<div class="fuelhint">${esc(fh)}</div>`:"";
+  const cl=costLine(a,null); const v0=effVehicle(a,null);
+  const vehFallback=(!cl&&v0)?`<div class="vehline">🚗 ${esc(v0.name)}${v0.mpg?` · ${v0.mpg} mpg`:""}</div>`:"";
   return `<div class="acard" data-id="${a.id}">
     <div class="atime">${label12(a.start)}<small>${label12(a.end)}</small></div>
     <div class="abody">
@@ -942,7 +995,7 @@ function activityCard(a){
       <div class="aloc" style="text-transform:none">${esc(recurLabel(a))}</div>
       ${pname?`<div class="aloc">📍 ${esc(pname)}${addr?" — "+esc(addr):""}</div>`:""}
       ${a.notes?`<div class="aloc">📝 ${esc(a.notes)}</div>`:""}
-      ${trans}${vehLine}${distLine}${fuel}
+      ${trans}${distLine}${cl||vehFallback}
       ${dir?`<div class="atrans" style="margin-top:6px">${dir}</div>`:""}
     </div></div>`;
 }
@@ -957,18 +1010,17 @@ function driverTaskCard(it){
   const line=drop?`Get <b>${esc(kidName(a.kidId))}</b> to <b>${esc(a.name)}</b>`:`Collect <b>${esc(kidName(a.kidId))}</b> from <b>${esc(a.name)}</b>`;
   const when=drop?`Arrive by ${label12(a.start)}`:`Ready at ${label12(a.end)}`;
   const route=(origId||destId)?`<div class="tmeta">${esc(placeName(origId)||"—")} → <b>${esc(placeName(destId)||"—")}</b></div>`:"";
-  const vId=vehForLeg(a,driverId); const vObj=vId?vehById(vId):null;
-  const vehLine=vObj?`<div class="vehline">🚗 ${esc(vObj.name)}${vObj.mpg?` · ${vObj.mpg} mpg`:""}</div>`:"";
   const em=effectiveMiles(a); const distLine=em>0?`<div class="vehline">📏 ${em} mi one-way${a.distMiles==null?" (auto)":""}</div>`:"";
+  const cl=costLine(a,driverId); const vObj=effVehicle(a,driverId);
+  const vehFallback=(!cl&&vObj)?`<div class="vehline">🚗 ${esc(vObj.name)}${vObj.mpg?` · ${vObj.mpg} mpg`:""}</div>`:"";
   const url=dirUrl(origAddr,destAddr);
   const dir=url?`<a class="dirbtn" href="${url}" target="_blank" rel="noopener">🧭 Directions</a>`:"";
-  const fh=fuelHintFor(a); const fuel=fh?`<div class="fuelhint">${esc(fh)}</div>`:"";
   return `<div class="acard taskcard" data-id="${a.id}">
     <div class="atime">${label12(it.t)}</div>
     <div class="abody">
       <div class="big">${verb}<span class="kiddot" style="background:${color}"></span> ${line}</div>
       <div class="tmeta">${when}${destAddr?` · 📍 ${esc(destAddr)}`:(placeName(destId)?` · 📍 ${esc(placeName(destId))}`:"")}</div>
-      ${route}${vehLine}${distLine}${fuel}
+      ${route}${distLine}${cl||vehFallback}
       ${a.notes?`<div class="tmeta">📝 ${esc(a.notes)}</div>`:""}
       ${dir?`<div class="atrans" style="margin-top:6px">${dir}</div>`:""}
     </div></div>`;
@@ -1063,8 +1115,18 @@ function modalMiles(){
 }
 function updateFuelHint(){
   const el=document.getElementById("fFuelHint");
-  const txt=computeFuelHint(val("fVeh"), modalMiles());
-  if(txt){ el.textContent=txt; el.style.display=""; } else { el.style.display="none"; }
+  const miles=modalMiles();
+  const vId=val("fVeh")||(function(){ const d=drvById(val("fDrop")||val("fPick")); return d?d.usualVehicleId:""; })();
+  const v=vId?vehById(vId):null; const rt=roundTrip(v,miles);
+  let txt="";
+  if(rt){
+    if(v.fuel==="Electric") txt="⚡ "+v.name+" · no gas cost";
+    else if(rt.cost==null)  txt="≈ "+rt.gal.toFixed(1)+" gal round trip in "+v.name;
+    else                    txt="≈ "+money(rt.cost)+" round trip · "+rt.gal.toFixed(1)+" gal in "+v.name;
+    const alt=cheaperAlt(v,miles,rt.cost);
+    if(alt) txt+=" — "+alt;
+  }
+  if(txt){ el.textContent=txt; el.style.display=""; } else el.style.display="none";
 }
 function refreshAutoDistHint(){
   const el=document.getElementById("fAutoVal"); if(!el) return;
@@ -1141,7 +1203,10 @@ function deleteAct(){ if(!ui.editingId) return;
 
 /* ================= SETUP MODAL ================= */
 function openManage(){ renderManage(); document.getElementById("mapsKeyInput").value=mapsKey();
-  document.getElementById("mapsStatus").textContent=mapsKey()?"Key saved on this device ✓":""; showOverlay("ovManage"); }
+  document.getElementById("mapsStatus").textContent=mapsKey()?"Key saved on this device ✓":"";
+  document.getElementById("gasPriceInput").value=state.gasPrice!=null?state.gasPrice:"";
+  document.getElementById("dieselPriceInput").value=state.dieselPrice!=null?state.dieselPrice:"";
+  showOverlay("ovManage"); }
 function emptyHint(t){ return `<div class="hint">${esc(t)}</div>`; }
 function swatchesHtml(pal,cur){ return pal.map(c=>`<span class="sw ${c===cur?"on":""}" data-c="${c}" style="background:${c}"></span>`).join(""); }
 function placeOptions(val){ return `<option value="">— none —</option>`+state.places.map(p=>`<option value="${p.id}" ${p.id===val?"selected":""}>${esc(p.name||"(unnamed)")}</option>`).join(""); }
@@ -1293,6 +1358,8 @@ function wire(){
   document.getElementById("mapsKeyInput").oninput=e=>{ const k=e.target.value.trim(); setMapsKey(k);
     const st=document.getElementById("mapsStatus"); if(st) st.textContent=k?"Key saved on this device ✓":""; };
   document.getElementById("mapsCompute").onclick=computeAllDistances;
+  document.getElementById("gasPriceInput").oninput=e=>{ state.gasPrice=+e.target.value||0; scheduleSoft(); render(); };
+  document.getElementById("dieselPriceInput").oninput=e=>{ state.dieselPrice=+e.target.value||0; scheduleSoft(); render(); };
   document.getElementById("addKid").onclick=addKid;
   document.getElementById("addDrv").onclick=addDrv;
   document.getElementById("addPlace").onclick=addPlace;
