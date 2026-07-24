@@ -58,7 +58,8 @@
     padding:8px 10px;border-radius:9px;font-weight:600;max-width:190px}
   .syncdot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none;
     box-shadow:0 0 0 3px transparent;transition:background .2s}
-  .syncwrap{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:default}
+  .syncwrap{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer}
+  .syncwrap:hover{color:var(--txt)}
   .syncdot.ok{background:var(--ok)} .syncdot.warn{background:var(--warn)}
   .syncdot.off{background:var(--danger)}
 
@@ -416,10 +417,11 @@ const LONG_TRIP_MI = 15;          // one-way miles that make a trip "long" for f
 
 /* ---------- id & schedule id ---------- */
 const rid = (p="")=> p + Math.random().toString(36).slice(2,8);
+let FRESH_ID=false;   // true when this device minted a brand-new schedule (no link, no history)
 function getScheduleId(){
   let id = (location.hash.match(/s=([A-Za-z0-9_-]+)/)||[])[1];
   if(!id) id = localStorage.getItem("familySchedule.lastId");
-  if(!id) id = "s" + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+  if(!id){ id = "s" + Math.random().toString(36).slice(2,10) + Date.now().toString(36); FRESH_ID=true; }
   if(location.hash.indexOf("s="+id)<0){ history.replaceState(null,"","#s="+id); }
   localStorage.setItem("familySchedule.lastId", id);
   return id;
@@ -705,10 +707,27 @@ async function computeAllDistances(){
 
 /* ================= SUPABASE SYNC ================= */
 let pushTimer=null, dirty=false, polling=false, everConnected=false;
+let syncProblem="";           // "" | "setup" (table missing) | "network"
 function sbHeaders(extra){ return Object.assign({ apikey:SB_KEY, Authorization:"Bearer "+SB_KEY,
   "Content-Type":"application/json" }, extra||{}); }
-function setSync(cls,txt){ const d=document.getElementById("syncdot"); d.className="syncdot "+cls;
-  document.getElementById("synctxt").textContent=txt; }
+function setSync(cls,txt,title){ const d=document.getElementById("syncdot"); d.className="syncdot "+cls;
+  document.getElementById("synctxt").textContent=txt;
+  document.getElementById("syncwrap").title=title||"Sync status — click for details"; }
+function hasContent(){ return (state.kids.length||state.acts.length||state.drivers.length||state.places.length||state.vehicles.length)>0; }
+/* Distinguish "table not created yet" (setup) from a real network failure. */
+async function classifyFailure(r){
+  if(!r) return "network";
+  if(r.status===404){ try{ const b=await r.clone().json();
+      if(b && (b.code==="PGRST205" || /Could not find the table/i.test(b.message||""))) return "setup"; }catch(e){}
+    return "setup"; }
+  if(r.status===401||r.status===403) return "setup";
+  return "network";
+}
+function showProblem(kind){
+  syncProblem=kind;
+  if(kind==="setup") setSync("off","Setup needed","Sharing is off: the cloud table hasn't been created yet. Click for details.");
+  else setSync("off","Offline","No connection to the sync server. Changes are saved on this device.");
+}
 
 async function cloudPush(){
   dirty=false;
@@ -720,9 +739,9 @@ async function cloudPush(){
     const r=await fetch(SB_URL+"/rest/v1/"+TABLE+"?on_conflict=id",{
       method:"POST", headers:sbHeaders({Prefer:"resolution=merge-duplicates,return=minimal"}),
       body:JSON.stringify(body)});
-    if(!r.ok) throw new Error(r.status);
-    everConnected=true; setSync("ok","Synced");
-  }catch(e){ setSync("off","Offline"); }
+    if(!r.ok){ showProblem(await classifyFailure(r)); return; }
+    everConnected=true; syncProblem=""; setSync("ok","Synced","Everyone with the link sees these changes.");
+  }catch(e){ showProblem("network"); }
 }
 function schedulePush(){ dirty=true; setSync("warn","…"); clearTimeout(pushTimer);
   pushTimer=setTimeout(cloudPush,700); }
@@ -732,20 +751,33 @@ async function cloudPull(){
   try{
     const r=await fetch(SB_URL+"/rest/v1/"+TABLE+"?id=eq."+encodeURIComponent(SCHED_ID)+"&select=data,updated_at",
       {headers:sbHeaders()});
-    if(!r.ok) throw new Error(r.status);
+    if(!r.ok){ showProblem(await classifyFailure(r)); return; }
     const rows=await r.json();
-    everConnected=true;
+    everConnected=true; syncProblem="";
     if(rows.length){
       const remote=rows[0].data||{};
       const rt=Date.parse(rows[0].updated_at)|| remote.updatedAt || 0;
       if(rt > (state.updatedAt||0) && !dirty){
         state = normalize(remote); state.updatedAt=rt; saveLocal(); render();
       }
+    }else if(hasContent()){
+      // Cloud has no copy of this schedule yet (e.g. table was just created) —
+      // seed it with what's on this device so other devices can see it.
+      cloudPush(); return;
     }
-    if(!dirty) setSync("ok","Synced");
-  }catch(e){ if(!dirty) setSync("off","Offline"); }
+    if(!dirty) setSync("ok","Synced","Everyone with the link sees these changes.");
+  }catch(e){ if(!dirty) showProblem("network"); }
 }
 function startPolling(){ if(polling) return; polling=true; cloudPull(); setInterval(cloudPull,7000); }
+function explainSync(){
+  if(syncProblem==="setup"){
+    alert("Sharing isn't on yet.\n\nThe cloud table for this app hasn't been created, so changes are only saved on this device — that's why your phone doesn't see them.\n\nFix (one time, ~2 min):\n1. Open your Supabase project → SQL Editor\n2. Paste and run the contents of supabase-setup.sql\n3. Come back here and reload — this device will upload automatically.");
+  }else if(syncProblem==="network"){
+    alert("Can't reach the sync server right now.\n\nYour changes are saved on this device and will upload automatically when the connection returns.");
+  }else{
+    alert("Sync is working ✓\n\nChanges save to the cloud and appear on every device that opens this same share link (the link ending in #s="+SCHED_ID+").\n\nIf a device isn't seeing updates, make sure it opened that exact link — not just the plain site address.");
+  }
+}
 
 /* ---------- local persistence ---------- */
 function saveLocal(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){} }
@@ -1084,13 +1116,16 @@ function driverTaskCard(it){
 }
 
 function emptyState(){
+  const joinHint = FRESH_ID ? `<p style="margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)">
+      <b>Joining someone's schedule?</b><br>Open the <b>share link</b> they sent you (it ends in <span class="mono">#s=…</span>).
+      This page started a brand-new empty schedule.</p>` : "";
   return `<div class="empty">
     <h2>Let's set up your family 👋</h2>
     <p>Add your kids, drivers, places and vehicles in <b>Setup</b>, then start adding activities.<br>Everything auto-syncs to anyone you share the link with.</p>
     <div style="margin-top:14px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
       <button class="btn primary" id="emAddPeople">🛠 Open Setup</button>
       <button class="btn" id="emAddAct">＋ Add activity</button>
-    </div></div>`;
+    </div>${joinHint}</div>`;
 }
 function wireEmpty(){
   const p=document.getElementById("emAddPeople"); if(p) p.onclick=openManage;
@@ -1403,6 +1438,7 @@ function wire(){
   document.getElementById("btnNextWk").onclick=()=>{ ui.weekStart=addDays(ui.weekStart,7); render(); };
   document.getElementById("btnToday").onclick=()=>{ ui.weekStart=mondayOf(new Date()); render(); };
   document.getElementById("filter").onchange=e=>{ ui.filter=e.target.value; render(); };
+  document.getElementById("syncwrap").onclick=explainSync;
   document.getElementById("btnShare").onclick=openShare;
   document.getElementById("btnManage").onclick=openManage;
   document.getElementById("btnAdd").onclick=()=>openAct(null);
