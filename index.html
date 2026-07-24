@@ -328,7 +328,11 @@
         </div>
         <div class="row2">
           <div class="field"><label>Vehicle</label><select id="fVeh"></select></div>
-          <div class="field"><label>One-way miles (optional)</label><input type="text" inputmode="decimal" id="fDist" placeholder="e.g. 22" autocomplete="off"></div>
+          <div class="field">
+            <label>One-way miles</label>
+            <div class="selrow"><input type="text" inputmode="decimal" id="fDist" placeholder="auto / manual" autocomplete="off"><button type="button" class="btn sm" id="fAutoBtn" title="Calculate driving distance">📍 Auto</button></div>
+            <div class="hint" id="fAutoVal"></div>
+          </div>
         </div>
         <div class="fuelhint" id="fFuelHint" style="display:none"></div>
         <div class="hint">Drop-off = there by start time. Pick-up = collected at end. “Leaves from / ends at” default to the driver’s home.</div>
@@ -353,6 +357,16 @@
       <div class="msec"><div class="subhead">Drivers <span class="lt">— set each one’s home & usual car</span></div><div class="mlist" id="drvList"></div><button class="btn sm" id="addDrv">＋ Add driver</button></div>
       <div class="msec"><div class="subhead">Places &amp; addresses <span class="lt">— homes and activity locations</span></div><div class="mlist" id="placeList"></div><button class="btn sm" id="addPlace">＋ Add place</button></div>
       <div class="msec"><div class="subhead">Vehicles <span class="lt">— name + MPG for fuel-smart trips</span></div><div class="mlist" id="vehList"></div><button class="btn sm" id="addVeh">＋ Add vehicle</button></div>
+      <div class="msec">
+        <div class="subhead">Auto-distances <span class="lt">— Google Maps (optional)</span></div>
+        <div class="field"><label>Google Maps API key</label>
+          <input type="text" id="mapsKeyInput" class="mono" placeholder="Paste your key — saved only on this device" autocomplete="off"></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+          <button class="btn sm" id="mapsCompute">📏 Calculate driving distances</button>
+          <span class="hint" id="mapsStatus"></span>
+        </div>
+        <div class="hint" style="margin-top:8px">Enable <b>Maps JavaScript API</b> + <b>Distance Matrix API</b> in Google Cloud, restrict the key to your site, then paste it here. Your key stays on this device — never shared or synced; only the resulting mileage is saved. <a href="https://developers.google.com/maps/documentation/javascript/get-api-key" target="_blank" rel="noopener">Get a key →</a></div>
+      </div>
     </div>
     <div class="foot"><div class="spacer"></div><button class="btn primary" id="mDone">Done</button></div>
   </div>
@@ -410,7 +424,7 @@ const LS_KEY = "familySchedule.data." + SCHED_ID;
 let state = defaultState();
 function defaultState(){
   return { title:"Our Family", buffer:15, dayStart:390, dayEnd:1320,
-           kids:[], drivers:[], places:[], vehicles:[], acts:[], updatedAt:0 };
+           kids:[], drivers:[], places:[], vehicles:[], acts:[], distCache:{}, updatedAt:0 };
 }
 let ui = { view:"week", filter:"all", editingId:null, editDow:1, editRepeat:"weekly",
            weekStart:mondayOf(new Date()), flashIds:[] };
@@ -479,7 +493,7 @@ function computeFuelHint(vehicleId, miles){
   const est=best.mpg?(" · ≈ "+(miles*2/best.mpg).toFixed(1)+" gal round trip"):"";
   return "⛽ Long trip ("+miles+" mi one-way) — most efficient is "+best.name+" ("+best.mpg+" mpg)"+est;
 }
-function fuelHintFor(a){ const miles=+a.distMiles||0; if(miles<LONG_TRIP_MI) return ""; return computeFuelHint(a.vehicleId,miles); }
+function fuelHintFor(a){ const miles=effectiveMiles(a)||0; if(miles<LONG_TRIP_MI) return ""; return computeFuelHint(a.vehicleId,miles); }
 
 /* ---------- directions ---------- */
 function dirUrl(originAddr, destAddr){
@@ -488,6 +502,76 @@ function dirUrl(originAddr, destAddr){
   if(originAddr) u+="&origin="+encodeURIComponent(originAddr);
   if(destAddr)   u+="&destination="+encodeURIComponent(destAddr);
   return u;
+}
+
+/* ---------- auto-distances (Google Maps JS SDK, client-side) ---------- */
+/* The API key lives only in this-device localStorage — never synced or shared.
+   Only the resulting mileage is cached in state.distCache (shared), so drivers
+   see distances/fuel hints without needing a key of their own. */
+function normAddr(s){ return String(s||"").trim().toLowerCase().replace(/\s+/g," "); }
+function pairKey(o,d){ return normAddr(o)+"||"+normAddr(d); }
+function repAddrs(act){
+  if(!act || !act.trans) return null;
+  const homeId = act.dropId ? (act.dropFromId||driverHomeId(act.dropId)) : (act.pickToId||driverHomeId(act.pickId));
+  const oAddr=placeAddr(homeId), dAddr=placeAddr(act.placeId);
+  if(!oAddr||!dAddr) return null;
+  return {oAddr,dAddr};
+}
+function cachedMiles(oAddr,dAddr){ const v=state.distCache[pairKey(oAddr,dAddr)]; return typeof v==="number"?v:null; }
+function autoMilesFor(act){ const ra=repAddrs(act); if(!ra) return null; return cachedMiles(ra.oAddr,ra.dAddr); }
+function effectiveMiles(act){ if(act.distMiles!=null) return act.distMiles; const am=autoMilesFor(act); return am!=null?am:0; }
+
+let gmapsPromise=null;
+function mapsKey(){ try{ return localStorage.getItem("familySchedule.gmapsKey")||""; }catch(e){ return ""; } }
+function setMapsKey(k){ try{ if(k) localStorage.setItem("familySchedule.gmapsKey",k); else localStorage.removeItem("familySchedule.gmapsKey"); }catch(e){} gmapsPromise=null; }
+function loadGMaps(){
+  if(!mapsKey()) return Promise.reject(new Error("no-key"));
+  if(window.google&&window.google.maps) return Promise.resolve(window.google);
+  if(gmapsPromise) return gmapsPromise;
+  gmapsPromise=new Promise((res,rej)=>{
+    const cb="__gmapsReady"+Math.random().toString(36).slice(2,8);
+    window[cb]=()=>{ res(window.google); try{delete window[cb];}catch(e){} };
+    const s=document.createElement("script");
+    s.src="https://maps.googleapis.com/maps/api/js?key="+encodeURIComponent(mapsKey())+"&loading=async&callback="+cb;
+    s.async=true; s.defer=true;
+    s.onerror=()=>{ gmapsPromise=null; rej(new Error("load-failed")); };
+    document.head.appendChild(s);
+  });
+  return gmapsPromise;
+}
+window.gm_authFailure=function(){ gmapsPromise=null; toast("Google Maps rejected the key — check it and its restrictions"); };
+function gmapsDistanceMiles(oAddr,dAddr){
+  return loadGMaps().then(g=> new Promise((res,rej)=>{
+    const svc=new g.maps.DistanceMatrixService();
+    svc.getDistanceMatrix({origins:[oAddr],destinations:[dAddr],travelMode:g.maps.TravelMode.DRIVING,unitSystem:g.maps.UnitSystem.IMPERIAL},(resp,status)=>{
+      if(status!=="OK") return rej(new Error(status));
+      const el=resp&&resp.rows&&resp.rows[0]&&resp.rows[0].elements&&resp.rows[0].elements[0];
+      if(!el||el.status!=="OK") return rej(new Error(el?el.status:"NO_RESULT"));
+      res(el.distance.value/1609.344); // metres → miles
+    });
+  }));
+}
+async function computeDistanceFor(act){
+  const ra=repAddrs(act); if(!ra) return null;
+  const cached=cachedMiles(ra.oAddr,ra.dAddr); if(cached!=null) return cached;
+  const miles=Math.round((await gmapsDistanceMiles(ra.oAddr,ra.dAddr))*10)/10;
+  state.distCache[pairKey(ra.oAddr,ra.dAddr)]=miles; saveLocal(); schedulePush();
+  return miles;
+}
+async function computeAllDistances(){
+  if(!mapsKey()){ toast("Add your Google Maps key first"); return; }
+  const status=document.getElementById("mapsStatus"), btn=document.getElementById("mapsCompute");
+  const seen=new Set(), jobs=[];
+  state.acts.forEach(a=>{ const ra=repAddrs(a); if(a.trans&&ra){ const k=pairKey(ra.oAddr,ra.dAddr);
+    if(cachedMiles(ra.oAddr,ra.dAddr)==null && !seen.has(k)){ seen.add(k); jobs.push(ra); } } });
+  if(!jobs.length){ if(status) status.textContent="Everything is already calculated."; return; }
+  if(btn) btn.disabled=true; let done=0,fail=0;
+  for(const ra of jobs){ if(status) status.textContent="Calculating "+(done+fail+1)+"/"+jobs.length+"…";
+    try{ const m=Math.round((await gmapsDistanceMiles(ra.oAddr,ra.dAddr))*10)/10; state.distCache[pairKey(ra.oAddr,ra.dAddr)]=m; done++; }
+    catch(e){ fail++; } }
+  saveLocal(); schedulePush(); render();
+  if(status) status.textContent="Done — "+done+" calculated"+(fail?(", "+fail+" failed (check addresses/key)"):"")+".";
+  if(btn) btn.disabled=false;
 }
 
 /* ================= SUPABASE SYNC ================= */
@@ -559,7 +643,8 @@ function normalize(s){
   }):[];
   return { title:s.title||d.title, buffer:Number.isFinite(s.buffer)?s.buffer:d.buffer,
     dayStart:s.dayStart||d.dayStart, dayEnd:s.dayEnd||d.dayEnd,
-    kids, drivers, places, vehicles, acts, updatedAt:s.updatedAt||0 };
+    kids, drivers, places, vehicles, acts,
+    distCache:(s.distCache&&typeof s.distCache==="object")?s.distCache:{}, updatedAt:s.updatedAt||0 };
 }
 
 /* ---------- mutations ---------- */
@@ -828,6 +913,7 @@ function activityCard(a){
   const dir=addr?`<a class="dirbtn" href="${url}" target="_blank" rel="noopener">🧭 Directions</a>`:"";
   const veh=(a.vehicleId&&vehById(a.vehicleId));
   const vehLine=veh?`<div class="vehline">🚗 ${esc(veh.name)}${veh.mpg?` · ${veh.mpg} mpg`:""}</div>`:"";
+  const em=effectiveMiles(a); const distLine=em>0?`<div class="vehline">📏 ${em} mi one-way${a.distMiles==null?" (auto)":""}</div>`:"";
   const fh=fuelHintFor(a); const fuel=fh?`<div class="fuelhint">${esc(fh)}</div>`:"";
   return `<div class="acard" data-id="${a.id}">
     <div class="atime">${label12(a.start)}<small>${label12(a.end)}</small></div>
@@ -836,7 +922,7 @@ function activityCard(a){
       <div class="aloc" style="text-transform:none">${esc(recurLabel(a))}</div>
       ${pname?`<div class="aloc">📍 ${esc(pname)}${addr?" — "+esc(addr):""}</div>`:""}
       ${a.notes?`<div class="aloc">📝 ${esc(a.notes)}</div>`:""}
-      ${trans}${vehLine}${fuel}
+      ${trans}${vehLine}${distLine}${fuel}
       ${dir?`<div class="atrans" style="margin-top:6px">${dir}</div>`:""}
     </div></div>`;
 }
@@ -853,6 +939,7 @@ function driverTaskCard(it){
   const route=(origId||destId)?`<div class="tmeta">${esc(placeName(origId)||"—")} → <b>${esc(placeName(destId)||"—")}</b></div>`:"";
   const vId=vehForLeg(a,driverId); const vObj=vId?vehById(vId):null;
   const vehLine=vObj?`<div class="vehline">🚗 ${esc(vObj.name)}${vObj.mpg?` · ${vObj.mpg} mpg`:""}</div>`:"";
+  const em=effectiveMiles(a); const distLine=em>0?`<div class="vehline">📏 ${em} mi one-way${a.distMiles==null?" (auto)":""}</div>`:"";
   const url=dirUrl(origAddr,destAddr);
   const dir=url?`<a class="dirbtn" href="${url}" target="_blank" rel="noopener">🧭 Directions</a>`:"";
   const fh=fuelHintFor(a); const fuel=fh?`<div class="fuelhint">${esc(fh)}</div>`:"";
@@ -861,7 +948,7 @@ function driverTaskCard(it){
     <div class="abody">
       <div class="big">${verb}<span class="kiddot" style="background:${color}"></span> ${line}</div>
       <div class="tmeta">${when}${destAddr?` · 📍 ${esc(destAddr)}`:(placeName(destId)?` · 📍 ${esc(placeName(destId))}`:"")}</div>
-      ${route}${vehLine}${fuel}
+      ${route}${vehLine}${distLine}${fuel}
       ${a.notes?`<div class="tmeta">📝 ${esc(a.notes)}</div>`:""}
       ${dir?`<div class="atrans" style="margin-top:6px">${dir}</div>`:""}
     </div></div>`;
@@ -930,7 +1017,7 @@ function openAct(id){
   fillPlaceSelect(document.getElementById("fPickTo"), a?a.pickToId:"", "home");
   fillVehSelect(document.getElementById("fVeh"), a?a.vehicleId:"");
   document.getElementById("fDist").value=(a&&a.distMiles!=null)?a.distMiles:"";
-  updateFuelHint();
+  updateFuelHint(); refreshAutoDistHint();
   document.getElementById("fNotes").value=a?a.notes:"";
   document.getElementById("fDelete").style.display=a?"":"none";
   showOverlay("ovAct");
@@ -941,10 +1028,44 @@ function renderDow(){
   [...document.querySelectorAll("#fDow button")].forEach(b=>b.onclick=()=>{ ui.editDow=+b.dataset.d; renderDow(); });
 }
 function toggleTrans(on){ document.getElementById("transbox").classList.toggle("off",!on); }
+function modalRepAddrs(){
+  const dropId=val("fDrop"), pickId=val("fPick"), dropFrom=val("fDropFrom"), pickTo=val("fPickTo"), placeId=val("fPlace");
+  const homeId = dropId? (dropFrom||driverHomeId(dropId)) : (pickTo||driverHomeId(pickId));
+  const oAddr=placeAddr(homeId), dAddr=placeAddr(placeId);
+  if(!oAddr||!dAddr) return null;
+  return {oAddr,dAddr};
+}
+function modalMiles(){
+  const manual=val("fDist").trim();
+  if(manual!=="") return +manual||0;
+  const ra=modalRepAddrs(); if(ra){ const m=cachedMiles(ra.oAddr,ra.dAddr); if(m!=null) return m; }
+  return 0;
+}
 function updateFuelHint(){
   const el=document.getElementById("fFuelHint");
-  const txt=computeFuelHint(document.getElementById("fVeh").value, document.getElementById("fDist").value);
+  const txt=computeFuelHint(val("fVeh"), modalMiles());
   if(txt){ el.textContent=txt; el.style.display=""; } else { el.style.display="none"; }
+}
+function refreshAutoDistHint(){
+  const el=document.getElementById("fAutoVal"); if(!el) return;
+  if(!mapsKey()){ el.textContent="Add a Google Maps key in Setup to auto-calc."; return; }
+  const ra=modalRepAddrs();
+  if(!ra){ el.textContent="Set the driver's home + place addresses to auto-calc."; return; }
+  const m=cachedMiles(ra.oAddr,ra.dAddr);
+  el.textContent = m!=null ? ("On file: "+m+" mi driving") : "Tap Auto to calculate.";
+}
+async function autoFillDistance(){
+  if(!mapsKey()){ toast("Add your Google Maps key in Setup first"); openManage(); return; }
+  const ra=modalRepAddrs();
+  if(!ra){ toast("Need a driver with a home address and a place with an address"); return; }
+  const btn=document.getElementById("fAutoBtn"); const old=btn.textContent; btn.disabled=true; btn.textContent="…";
+  try{
+    let m=cachedMiles(ra.oAddr,ra.dAddr);
+    if(m==null){ m=Math.round((await gmapsDistanceMiles(ra.oAddr,ra.dAddr))*10)/10; state.distCache[pairKey(ra.oAddr,ra.dAddr)]=m; saveLocal(); schedulePush(); }
+    document.getElementById("fDist").value=m; updateFuelHint(); refreshAutoDistHint();
+    toast("Driving distance: "+m+" mi");
+  }catch(e){ toast("Couldn't get distance ("+(e.message||"error")+")"); }
+  btn.disabled=false; btn.textContent=old;
 }
 function showNewPlace(){ document.getElementById("fNewPlace").style.display="";
   setTimeout(()=>document.getElementById("fNewPlaceName").focus(),30); }
@@ -986,15 +1107,20 @@ function saveAct(){
     vehicleId:document.getElementById("fVeh").value, distMiles, notes:document.getElementById("fNotes").value.trim() };
   if(start<state.dayStart) state.dayStart=Math.floor(start/60)*60;
   if(end>state.dayEnd) state.dayEnd=Math.ceil(end/60)*60;
-  if(ui.editingId){ Object.assign(state.acts.find(x=>x.id===ui.editingId),rec); }
-  else state.acts.push(Object.assign({id:rid("a")},rec));
+  let saved;
+  if(ui.editingId){ saved=state.acts.find(x=>x.id===ui.editingId); Object.assign(saved,rec); }
+  else { saved=Object.assign({id:rid("a")},rec); state.acts.push(saved); }
   hideOverlay("ovAct"); commit();
+  // auto-fill driving distance in the background if a maps key is set and none is on file
+  if(mapsKey() && saved.distMiles==null && repAddrs(saved) && autoMilesFor(saved)==null){
+    computeDistanceFor(saved).then(m=>{ if(m!=null) render(); }).catch(()=>{});
+  }
 }
 function deleteAct(){ if(!ui.editingId) return;
   state.acts=state.acts.filter(a=>a.id!==ui.editingId); hideOverlay("ovAct"); commit(); }
 
 /* ================= SETUP MODAL ================= */
-function openManage(){ renderManage(); showOverlay("ovManage"); }
+function openManage(){ renderManage(); document.getElementById("mapsKeyInput").value=mapsKey(); showOverlay("ovManage"); }
 function emptyHint(t){ return `<div class="hint">${esc(t)}</div>`; }
 function swatchesHtml(pal,cur){ return pal.map(c=>`<span class="sw ${c===cur?"on":""}" data-c="${c}" style="background:${c}"></span>`).join(""); }
 function placeOptions(val){ return `<option value="">— none —</option>`+state.places.map(p=>`<option value="${p.id}" ${p.id===val?"selected":""}>${esc(p.name||"(unnamed)")}</option>`).join(""); }
@@ -1109,6 +1235,7 @@ async function copyLink(){
 
 /* ================= helpers / wiring ================= */
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+function val(id){ const e=document.getElementById(id); return e?e.value:""; }
 function showOverlay(id){ document.getElementById(id).classList.add("show"); }
 function hideOverlay(id){ document.getElementById(id).classList.remove("show"); }
 let toastTimer=null;
@@ -1138,7 +1265,12 @@ function wire(){
   document.getElementById("fNewPlaceCancel").onclick=hideNewPlace;
   document.getElementById("fVeh").onchange=updateFuelHint;
   document.getElementById("fDist").oninput=updateFuelHint;
+  document.getElementById("fAutoBtn").onclick=autoFillDistance;
+  ["fDrop","fPick","fDropFrom","fPickTo","fPlace"].forEach(id=>{
+    document.getElementById(id).addEventListener("change",()=>{ updateFuelHint(); refreshAutoDistHint(); }); });
   // setup
+  document.getElementById("mapsKeyInput").oninput=e=>{ setMapsKey(e.target.value.trim()); };
+  document.getElementById("mapsCompute").onclick=computeAllDistances;
   document.getElementById("addKid").onclick=addKid;
   document.getElementById("addDrv").onclick=addDrv;
   document.getElementById("addPlace").onclick=addPlace;
