@@ -559,19 +559,39 @@ async function computeDistanceFor(act){
   return miles;
 }
 async function computeAllDistances(){
-  if(!mapsKey()){ toast("Add your Google Maps key first"); return; }
   const status=document.getElementById("mapsStatus"), btn=document.getElementById("mapsCompute");
-  const seen=new Set(), jobs=[];
-  state.acts.forEach(a=>{ const ra=repAddrs(a); if(a.trans&&ra){ const k=pairKey(ra.oAddr,ra.dAddr);
-    if(cachedMiles(ra.oAddr,ra.dAddr)==null && !seen.has(k)){ seen.add(k); jobs.push(ra); } } });
-  if(!jobs.length){ if(status) status.textContent="Everything is already calculated."; return; }
-  if(btn) btn.disabled=true; let done=0,fail=0;
-  for(const ra of jobs){ if(status) status.textContent="Calculating "+(done+fail+1)+"/"+jobs.length+"…";
-    try{ const m=Math.round((await gmapsDistanceMiles(ra.oAddr,ra.dAddr))*10)/10; state.distCache[pairKey(ra.oAddr,ra.dAddr)]=m; done++; }
-    catch(e){ fail++; } }
+  const say=m=>{ if(status) status.textContent=m; };
+  if(!mapsKey()){ say("Paste your API key in the box above first."); toast("Add your Google Maps key first"); return; }
+  const transActs=state.acts.filter(a=>a.trans);
+  if(!transActs.length){ say("No activities need a ride yet — nothing to calculate."); toast("No ride-needing activities"); return; }
+  // build jobs and record WHY any are skipped
+  const seen=new Set(), jobs=[]; let missHome=0, missPlace=0;
+  transActs.forEach(a=>{
+    const homeId = a.dropId ? (a.dropFromId||driverHomeId(a.dropId)) : (a.pickToId||driverHomeId(a.pickId));
+    const oAddr=placeAddr(homeId), dAddr=placeAddr(a.placeId);
+    if(!(a.dropId||a.pickId) || !oAddr){ missHome++; return; }
+    if(!dAddr){ missPlace++; return; }
+    const k=pairKey(oAddr,dAddr);
+    if(cachedMiles(oAddr,dAddr)==null && !seen.has(k)){ seen.add(k); jobs.push({oAddr,dAddr}); }
+  });
+  if(!jobs.length){
+    if(missHome||missPlace){
+      const bits=[]; if(missHome)bits.push(missHome+" with no driver home address");
+      if(missPlace)bits.push(missPlace+" with no place address");
+      say("Nothing to calculate ("+bits.join(", ")+"). Add addresses in Setup, then retry.");
+      toast("Set driver home + place addresses first");
+    }else{ say("✓ All distances are already calculated."); toast("Already up to date"); }
+    return;
+  }
+  if(btn) btn.disabled=true; let done=0,fail=0,lastErr="";
+  for(const j of jobs){ say("Calculating "+(done+fail+1)+" of "+jobs.length+"…");
+    try{ const m=Math.round((await gmapsDistanceMiles(j.oAddr,j.dAddr))*10)/10; state.distCache[pairKey(j.oAddr,j.dAddr)]=m; done++; }
+    catch(e){ fail++; lastErr=(e&&e.message)||"error"; } }
   saveLocal(); schedulePush(); render();
-  if(status) status.textContent="Done — "+done+" calculated"+(fail?(", "+fail+" failed (check addresses/key)"):"")+".";
   if(btn) btn.disabled=false;
+  if(done&&!fail){ say("✓ Calculated "+done+" distance"+(done>1?"s":"")+"."); toast("Done — "+done+" distance"+(done>1?"s":"")+" added"); }
+  else if(done&&fail){ say("Calculated "+done+", but "+fail+" failed — "+lastErr+"."); toast(fail+" failed: "+lastErr); }
+  else { say("Couldn't calculate — Google said \""+lastErr+"\". Check the API is enabled + the key restriction."); toast("Failed: "+lastErr); }
 }
 
 /* ================= SUPABASE SYNC ================= */
@@ -1120,7 +1140,8 @@ function deleteAct(){ if(!ui.editingId) return;
   state.acts=state.acts.filter(a=>a.id!==ui.editingId); hideOverlay("ovAct"); commit(); }
 
 /* ================= SETUP MODAL ================= */
-function openManage(){ renderManage(); document.getElementById("mapsKeyInput").value=mapsKey(); showOverlay("ovManage"); }
+function openManage(){ renderManage(); document.getElementById("mapsKeyInput").value=mapsKey();
+  document.getElementById("mapsStatus").textContent=mapsKey()?"Key saved on this device ✓":""; showOverlay("ovManage"); }
 function emptyHint(t){ return `<div class="hint">${esc(t)}</div>`; }
 function swatchesHtml(pal,cur){ return pal.map(c=>`<span class="sw ${c===cur?"on":""}" data-c="${c}" style="background:${c}"></span>`).join(""); }
 function placeOptions(val){ return `<option value="">— none —</option>`+state.places.map(p=>`<option value="${p.id}" ${p.id===val?"selected":""}>${esc(p.name||"(unnamed)")}</option>`).join(""); }
@@ -1269,7 +1290,8 @@ function wire(){
   ["fDrop","fPick","fDropFrom","fPickTo","fPlace"].forEach(id=>{
     document.getElementById(id).addEventListener("change",()=>{ updateFuelHint(); refreshAutoDistHint(); }); });
   // setup
-  document.getElementById("mapsKeyInput").oninput=e=>{ setMapsKey(e.target.value.trim()); };
+  document.getElementById("mapsKeyInput").oninput=e=>{ const k=e.target.value.trim(); setMapsKey(k);
+    const st=document.getElementById("mapsStatus"); if(st) st.textContent=k?"Key saved on this device ✓":""; };
   document.getElementById("mapsCompute").onclick=computeAllDistances;
   document.getElementById("addKid").onclick=addKid;
   document.getElementById("addDrv").onclick=addDrv;
