@@ -394,6 +394,15 @@
         </div>
       </div>
       <p class="hint">Anyone with this link can view and edit. Keep it within your circle — the link itself is the key.</p>
+      <div class="msec" style="border-top:1px solid var(--line);padding-top:14px;margin-top:4px">
+        <div class="subhead">Open a different schedule</div>
+        <p class="hint" style="margin:0 0 8px">On a phone or tablet that's showing the wrong (or empty) schedule, paste the share link here to point this device at the right one. It'll remember from then on.</p>
+        <div class="linkbox">
+          <input type="text" id="joinInput" class="mono" placeholder="Paste share link or ID" autocomplete="off">
+          <button class="btn" id="joinBtn">Switch</button>
+        </div>
+        <div class="hint" id="joinStatus" style="margin-top:6px"></div>
+      </div>
     </div>
     <div class="foot"><div class="spacer"></div><button class="btn primary" id="shareDone">Done</button></div>
   </div>
@@ -1116,20 +1125,29 @@ function driverTaskCard(it){
 }
 
 function emptyState(){
-  const joinHint = FRESH_ID ? `<p style="margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)">
-      <b>Joining someone's schedule?</b><br>Open the <b>share link</b> they sent you (it ends in <span class="mono">#s=…</span>).
-      This page started a brand-new empty schedule.</p>` : "";
   return `<div class="empty">
     <h2>Let's set up your family 👋</h2>
     <p>Add your kids, drivers, places and vehicles in <b>Setup</b>, then start adding activities.<br>Everything auto-syncs to anyone you share the link with.</p>
     <div style="margin-top:14px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
       <button class="btn primary" id="emAddPeople">🛠 Open Setup</button>
       <button class="btn" id="emAddAct">＋ Add activity</button>
-    </div>${joinHint}</div>`;
+    </div>
+    <div style="margin-top:18px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);text-align:left;max-width:460px;margin-left:auto;margin-right:auto">
+      <b>Expecting your family's schedule?</b>
+      <p class="hint" style="margin:4px 0 8px">This device is showing an empty schedule. Paste your share link to point it at the right one.</p>
+      <div class="linkbox">
+        <input type="text" id="emJoinInput" class="mono" placeholder="Paste share link or ID" autocomplete="off">
+        <button class="btn primary" id="emJoinBtn">Switch</button>
+      </div>
+      <div class="hint" id="emJoinStatus" style="margin-top:6px"></div>
+    </div></div>`;
 }
 function wireEmpty(){
   const p=document.getElementById("emAddPeople"); if(p) p.onclick=openManage;
   const a=document.getElementById("emAddAct"); if(a) a.onclick=()=>openAct(null);
+  const jb=document.getElementById("emJoinBtn"), ji=document.getElementById("emJoinInput");
+  if(jb) jb.onclick=()=>switchSchedule(ji.value,"emJoinStatus");
+  if(ji) ji.onkeydown=e=>{ if(e.key==="Enter") switchSchedule(ji.value,"emJoinStatus"); };
 }
 
 /* ================= ACTIVITY MODAL ================= */
@@ -1421,6 +1439,21 @@ async function copyLink(){
   try{ await navigator.clipboard.writeText(url); toast("Link copied ✓"); }
   catch(e){ const i=document.getElementById("shareUrl"); i.focus(); i.select(); document.execCommand("copy"); toast("Link copied ✓"); }
 }
+/* Point THIS device at a different schedule (paste a share link or a bare id). */
+function parseScheduleId(raw){
+  const s=String(raw||"").trim(); if(!s) return "";
+  const m=s.match(/[#&?]s=([A-Za-z0-9_-]+)/); if(m) return m[1];
+  return /^[A-Za-z0-9_-]{6,}$/.test(s)? s : "";
+}
+function switchSchedule(raw, statusId){
+  const st=statusId?document.getElementById(statusId):null;
+  const id=parseScheduleId(raw);
+  if(!id){ if(st) st.textContent="That doesn't look like a share link or ID."; toast("Paste the full share link"); return; }
+  if(id===SCHED_ID){ if(st) st.textContent="This device is already on that schedule."; toast("Already on this schedule"); return; }
+  try{ localStorage.setItem("familySchedule.lastId", id); }catch(e){}
+  location.hash="#s="+id;
+  location.reload();
+}
 
 /* ================= helpers / wiring ================= */
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
@@ -1472,6 +1505,8 @@ function wire(){
   // share
   document.getElementById("copyLink").onclick=copyLink;
   document.getElementById("shareDone").onclick=()=>hideOverlay("ovShare");
+  document.getElementById("joinBtn").onclick=()=>switchSchedule(document.getElementById("joinInput").value,"joinStatus");
+  document.getElementById("joinInput").onkeydown=e=>{ if(e.key==="Enter") switchSchedule(e.target.value,"joinStatus"); };
   // overlay click-out
   [...document.querySelectorAll(".overlay")].forEach(o=> o.addEventListener("click",e=>{ if(e.target===o){
     o.classList.remove("show"); if(o.id==="ovManage") commit(); }}));
