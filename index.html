@@ -64,11 +64,17 @@
 
   .wrap{max-width:1200px;margin:0 auto;padding:14px}
 
-  /* View toggle */
-  .viewbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  /* View toggle + week nav */
+  .viewbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
   .seg{display:inline-flex;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px}
   .seg button{border:0;background:transparent;color:var(--muted);padding:6px 14px;border-radius:8px;font-weight:700;font-size:13px}
   .seg button.on{background:var(--panel);color:var(--txt);box-shadow:var(--shadow)}
+  .weeknav{display:flex;align-items:center;gap:6px}
+  .weeknav .lbl{font-weight:700;font-size:14px;min-width:118px;text-align:center;line-height:1.15}
+  .weeknav .lbl small{display:block;color:var(--muted);font-weight:600;font-size:11px}
+  .iconbtn{border:1px solid var(--line);background:var(--panel);border-radius:8px;width:32px;height:32px;
+    display:inline-flex;align-items:center;justify-content:center;font-size:18px;color:var(--txt);line-height:1}
+  .iconbtn:hover{background:var(--panel2)}
   .filterinfo{font-size:13px;color:var(--muted)}
   .filterinfo b{color:var(--txt)}
 
@@ -109,6 +115,7 @@
   .ev .etr{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
   .chip{background:rgba(0,0,0,.22);border-radius:6px;padding:1px 5px;font-size:10px;display:inline-flex;align-items:center;gap:3px;line-height:1.4}
   .chip.miss{background:rgba(255,255,255,.28);color:#fff;font-weight:700}
+  .chip.veh{background:rgba(0,0,0,.32)}
   .ev.flash{animation:flash 1.4s ease}
   @keyframes flash{0%,100%{box-shadow:0 1px 2px rgba(0,0,0,.25)}30%,70%{box-shadow:0 0 0 3px var(--orange),0 0 12px var(--orange)}}
   .ev .warnbadge{position:absolute;top:2px;right:3px;font-size:11px}
@@ -130,10 +137,15 @@
   .kiddot{width:10px;height:10px;border-radius:50%;flex:none;display:inline-block}
   .acard .aname{color:var(--muted);font-weight:600;margin-left:6px}
   .acard .aloc{color:var(--muted);font-size:13px;margin-top:1px}
-  .acard .atrans{margin-top:5px;display:flex;gap:6px;flex-wrap:wrap}
+  .acard .atrans{margin-top:5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
   .tpill{font-size:11.5px;border:1px solid var(--line);border-radius:20px;padding:2px 9px;display:inline-flex;align-items:center;gap:5px;background:var(--panel2)}
   .tpill.miss{border-color:var(--danger);color:var(--danger);font-weight:700}
   .tpill .who{font-weight:700}
+  .dirbtn{font-size:11.5px;border:1px solid var(--line);border-radius:20px;padding:2px 9px;background:var(--panel2);
+    color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;font-weight:700}
+  .dirbtn:hover{background:var(--panel)}
+  .vehline{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .fuelhint{font-size:12px;color:var(--warn);font-weight:600;margin-top:4px;display:flex;align-items:center;gap:5px}
   /* driver task card */
   .taskcard .big{font-weight:800;font-size:15px}
   .taskcard .tmeta{color:var(--muted);font-size:13px;margin-top:2px}
@@ -153,7 +165,7 @@
   .overlay{position:fixed;inset:0;background:rgba(10,14,20,.55);z-index:200;display:none;
     align-items:flex-start;justify-content:center;padding:24px 14px;overflow:auto}
   .overlay.show{display:flex}
-  .modal{background:var(--panel);border-radius:16px;width:100%;max-width:520px;box-shadow:0 20px 60px rgba(0,0,0,.35);
+  .modal{background:var(--panel);border-radius:16px;width:100%;max-width:540px;box-shadow:0 20px 60px rgba(0,0,0,.35);
     border:1px solid var(--line);animation:pop .14s ease}
   @keyframes pop{from{transform:translateY(8px);opacity:.6}to{transform:none;opacity:1}}
   .modal h2{margin:0;padding:16px 18px;border-bottom:1px solid var(--line);font-size:17px;display:flex;align-items:center;gap:8px}
@@ -161,30 +173,51 @@
   .modal .foot{padding:14px 18px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:center}
   .field{display:flex;flex-direction:column;gap:5px}
   .field>label{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
-  .field input[type=text],.field input[type=time],.field select,.field textarea{
+  .field input[type=text],.field input[type=time],.field input[type=date],.field select,.field textarea{
     border:1px solid var(--line);background:var(--panel2);color:var(--txt);border-radius:9px;padding:9px 10px;font:inherit;width:100%}
   .field textarea{resize:vertical;min-height:52px}
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  .row3{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .dowpick{display:flex;gap:5px;flex-wrap:wrap}
   .dowpick button{border:1px solid var(--line);background:var(--panel2);color:var(--txt);border-radius:8px;padding:7px 0;font-weight:700;flex:1;min-width:38px;font-size:13px}
   .dowpick button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .rtoggle{display:flex;gap:6px}
+  .rtoggle button{flex:1;border:1px solid var(--line);background:var(--panel2);color:var(--txt);border-radius:9px;padding:9px;font-weight:700}
+  .rtoggle button.on{background:var(--accent);border-color:var(--accent);color:#fff}
   .checkline{display:flex;align-items:center;gap:9px;font-weight:600}
   .checkline input{width:18px;height:18px;accent-color:var(--orange)}
   .transbox{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel2);display:flex;flex-direction:column;gap:12px}
   .transbox.off{opacity:.5;pointer-events:none}
   .hint{font-size:12px;color:var(--muted)}
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .selrow{display:flex;gap:8px;align-items:center}
+  .selrow select{flex:1}
+  .addplace{border:1px dashed var(--line);border-radius:10px;padding:10px;background:var(--panel2);display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .addplace input{border:1px solid var(--line);background:var(--panel);color:var(--txt);border-radius:8px;padding:8px;font:inherit}
 
-  /* manage lists */
-  .mlist{display:flex;flex-direction:column;gap:8px}
+  /* setup lists */
+  .msec{border-top:1px solid var(--line);margin-top:4px;padding-top:12px}
+  .msec:first-of-type{border-top:0;margin-top:0;padding-top:0}
+  .mlist{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
   .mrow{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel2)}
   .mrow input.name{flex:1;border:0;background:transparent;color:var(--txt);font:inherit;font-weight:600;min-width:0}
   .mrow input.name:focus{outline:1px solid var(--accent);border-radius:5px}
   .swatches{display:flex;gap:4px}
   .sw{width:18px;height:18px;border-radius:50%;cursor:pointer;border:2px solid transparent}
   .sw.on{border-color:var(--txt)}
-  .subhead{font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:6px 0 2px}
+  .subhead{font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 8px}
+  .subhead .lt{text-transform:none;letter-spacing:0;font-weight:600;color:var(--muted)}
+  .drvcard{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--panel2);display:flex;flex-direction:column;gap:9px}
+  .drvcard .top{display:flex;align-items:center;gap:9px}
+  .drvcard .top input.name{flex:1;border:0;background:transparent;color:var(--txt);font:inherit;font-weight:700;min-width:0}
+  .drvcard .top input.name:focus{outline:1px solid var(--accent);border-radius:5px}
+  .drvcard .sub{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .drvcard .sub label{font-size:11px;color:var(--muted);font-weight:700;display:block;margin-bottom:3px;text-transform:uppercase;letter-spacing:.03em}
+  .drvcard select{width:100%;border:1px solid var(--line);background:var(--panel);color:var(--txt);border-radius:8px;padding:7px}
+  .prow,.vrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:8px;background:var(--panel2)}
+  .prow input,.vrow input,.vrow select{border:1px solid var(--line);background:var(--panel);color:var(--txt);border-radius:8px;padding:8px;font:inherit;min-width:0}
+  .prow .pn{flex:0 0 33%} .prow .pa{flex:1 1 45%}
+  .vrow .vn{flex:1 1 40%} .vrow .vm{width:82px} .vrow .vf{width:100px}
+
   .linkbox{display:flex;gap:8px;align-items:stretch}
   .linkbox input{flex:1;font-size:13px}
   .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:#1d2430;color:#fff;
@@ -199,6 +232,10 @@
     select.filter{max-width:140px}
     .wrap{padding:10px}
   }
+  @media (max-width:480px){
+    .row2{grid-template-columns:1fr}
+    .drvcard .sub{grid-template-columns:1fr}
+  }
 </style>
 </head>
 <body>
@@ -209,7 +246,7 @@
     <select class="filter" id="filter" title="Show only one person"></select>
     <div class="syncwrap" id="syncwrap" title="Sync status"><span class="syncdot" id="syncdot"></span><span id="synctxt">…</span></div>
     <button class="btn sm" id="btnShare">🔗 Share</button>
-    <button class="btn sm" id="btnManage">👨‍👩‍👧 People</button>
+    <button class="btn sm" id="btnManage">🛠 Setup</button>
   </div>
 </header>
 
@@ -218,6 +255,12 @@
     <div class="seg">
       <button id="segWeek" class="on">📅 Week</button>
       <button id="segAgenda">📋 Agenda</button>
+    </div>
+    <div class="weeknav">
+      <button class="iconbtn" id="btnPrevWk" title="Previous week">‹</button>
+      <div class="lbl" id="lblWeek"></div>
+      <button class="iconbtn" id="btnNextWk" title="Next week">›</button>
+      <button class="btn sm" id="btnToday">Today</button>
     </div>
     <div class="filterinfo" id="filterinfo"></div>
     <div class="spacer"></div>
@@ -236,22 +279,38 @@
     <h2 id="actTitle">Add activity</h2>
     <div class="body">
       <div class="row2">
-        <div class="field">
-          <label>Child</label>
-          <select id="fKid"></select>
-        </div>
-        <div class="field">
-          <label>Activity</label>
-          <input type="text" id="fName" placeholder="Soccer practice" autocomplete="off">
-        </div>
+        <div class="field"><label>Child</label><select id="fKid"></select></div>
+        <div class="field"><label>Activity</label><input type="text" id="fName" placeholder="Soccer practice" autocomplete="off"></div>
       </div>
       <div class="field">
         <label>Location</label>
-        <input type="text" id="fLoc" placeholder="Northside Fields" autocomplete="off">
+        <div class="selrow">
+          <select id="fPlace"></select>
+          <button type="button" class="btn sm" id="fAddPlaceBtn" title="Add a new place">＋ Place</button>
+        </div>
+        <div class="addplace" id="fNewPlace" style="display:none">
+          <input type="text" id="fNewPlaceName" placeholder="Place name (e.g. Northside Fields)" autocomplete="off">
+          <input type="text" id="fNewPlaceAddr" placeholder="Full address" autocomplete="off">
+          <div style="display:flex;gap:8px">
+            <button type="button" class="btn sm primary" id="fNewPlaceSave">Save place</button>
+            <button type="button" class="btn sm" id="fNewPlaceCancel">Cancel</button>
+          </div>
+        </div>
       </div>
       <div class="field">
-        <label>Day of week</label>
-        <div class="dowpick" id="fDow"></div>
+        <label>Repeats</label>
+        <div class="rtoggle"><button type="button" id="fRepWeekly">Weekly</button><button type="button" id="fRepOnce">One-time</button></div>
+      </div>
+      <div id="weeklyBlock">
+        <div class="field"><label>Day of week</label><div class="dowpick" id="fDow"></div></div>
+        <div class="row2">
+          <div class="field"><label>Season start</label><input type="date" id="fStartDate"></div>
+          <div class="field"><label>Season end</label><input type="date" id="fEndDate"></div>
+        </div>
+        <div class="hint">Leave dates blank for an ongoing weekly activity.</div>
+      </div>
+      <div id="onceBlock" style="display:none">
+        <div class="field"><label>Date</label><input type="date" id="fDate"></div>
       </div>
       <div class="row2">
         <div class="field"><label>Starts</label><input type="time" id="fStart" value="16:00"></div>
@@ -260,21 +319,21 @@
       <label class="checkline"><input type="checkbox" id="fTrans" checked> Needs a ride (assign drivers)</label>
       <div class="transbox" id="transbox">
         <div class="row2">
-          <div class="field">
-            <label>⬇ Drop-off driver</label>
-            <select id="fDrop"></select>
-          </div>
-          <div class="field">
-            <label>⬆ Pick-up driver</label>
-            <select id="fPick"></select>
-          </div>
+          <div class="field"><label>⬇ Drop-off driver</label><select id="fDrop"></select></div>
+          <div class="field"><label>⬆ Pick-up driver</label><select id="fPick"></select></div>
         </div>
-        <div class="hint">Drop-off = get them there by the start time. Pick-up = collect them at the end.</div>
+        <div class="row2">
+          <div class="field"><label>Drop-off leaves from</label><select id="fDropFrom"></select></div>
+          <div class="field"><label>Pick-up ends at</label><select id="fPickTo"></select></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>Vehicle</label><select id="fVeh"></select></div>
+          <div class="field"><label>One-way miles (optional)</label><input type="text" inputmode="decimal" id="fDist" placeholder="e.g. 22" autocomplete="off"></div>
+        </div>
+        <div class="fuelhint" id="fFuelHint" style="display:none"></div>
+        <div class="hint">Drop-off = there by start time. Pick-up = collected at end. “Leaves from / ends at” default to the driver’s home.</div>
       </div>
-      <div class="field">
-        <label>Notes (optional)</label>
-        <textarea id="fNotes" placeholder="Bring cleats & water bottle"></textarea>
-      </div>
+      <div class="field"><label>Notes (optional)</label><textarea id="fNotes" placeholder="Bring cleats & water bottle"></textarea></div>
     </div>
     <div class="foot">
       <button class="btn danger" id="fDelete">Delete</button>
@@ -285,22 +344,17 @@
   </div>
 </div>
 
-<!-- Manage people modal -->
+<!-- Setup modal -->
 <div class="overlay" id="ovManage">
   <div class="modal">
-    <h2>👨‍👩‍👧 People</h2>
+    <h2>🛠 Setup</h2>
     <div class="body">
-      <div class="subhead">Children</div>
-      <div class="mlist" id="kidList"></div>
-      <button class="btn sm" id="addKid">＋ Add child</button>
-      <div class="subhead" style="margin-top:10px">Drivers <span class="hint" style="text-transform:none;letter-spacing:0">(anyone who gives rides)</span></div>
-      <div class="mlist" id="drvList"></div>
-      <button class="btn sm" id="addDrv">＋ Add driver</button>
+      <div class="msec"><div class="subhead">Children</div><div class="mlist" id="kidList"></div><button class="btn sm" id="addKid">＋ Add child</button></div>
+      <div class="msec"><div class="subhead">Drivers <span class="lt">— set each one’s home & usual car</span></div><div class="mlist" id="drvList"></div><button class="btn sm" id="addDrv">＋ Add driver</button></div>
+      <div class="msec"><div class="subhead">Places &amp; addresses <span class="lt">— homes and activity locations</span></div><div class="mlist" id="placeList"></div><button class="btn sm" id="addPlace">＋ Add place</button></div>
+      <div class="msec"><div class="subhead">Vehicles <span class="lt">— name + MPG for fuel-smart trips</span></div><div class="mlist" id="vehList"></div><button class="btn sm" id="addVeh">＋ Add vehicle</button></div>
     </div>
-    <div class="foot">
-      <div class="spacer"></div>
-      <button class="btn primary" id="mDone">Done</button>
-    </div>
+    <div class="foot"><div class="spacer"></div><button class="btn primary" id="mDone">Done</button></div>
   </div>
 </div>
 
@@ -335,7 +389,9 @@ const DOW = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const DOW_FULL = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 const KID_COLORS = ["#FA4616","#0021A5","#2E9E4F","#8E44AD","#E67E22","#0d9aa8","#C0392B","#5D6D7E","#B7950B","#1F618D"];
 const DRV_COLORS = ["#0021A5","#FA4616","#2E9E4F","#8E44AD","#0d9aa8","#C0392B"];
+const FUEL_TYPES = ["Gas","Diesel","Hybrid","Plug-in Hybrid","Electric"];
 const PXMIN = 0.85;               // px per minute in week grid
+const LONG_TRIP_MI = 15;          // one-way miles that make a trip "long" for fuel suggestion
 
 /* ---------- id & schedule id ---------- */
 const rid = (p="")=> p + Math.random().toString(36).slice(2,8);
@@ -354,11 +410,12 @@ const LS_KEY = "familySchedule.data." + SCHED_ID;
 let state = defaultState();
 function defaultState(){
   return { title:"Our Family", buffer:15, dayStart:390, dayEnd:1320,
-           kids:[], drivers:[], acts:[], updatedAt:0 };
+           kids:[], drivers:[], places:[], vehicles:[], acts:[], updatedAt:0 };
 }
-let ui = { view:"week", filter:"all", editingId:null, editDow:1, flashIds:[] };
+let ui = { view:"week", filter:"all", editingId:null, editDow:1, editRepeat:"weekly",
+           weekStart:mondayOf(new Date()), flashIds:[] };
 
-/* ---------- time helpers ---------- */
+/* ---------- time / date helpers ---------- */
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 function toMin(hhmm){ const [h,m]=String(hhmm).split(":").map(Number); return h*60+(m||0); }
 function toHHMM(min){ const h=Math.floor(min/60),m=min%60; return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0"); }
@@ -366,12 +423,72 @@ function label12(min){ let h=Math.floor(min/60),m=min%60; const ap=h>=12?"PM":"A
   return h + (m?(":"+String(m).padStart(2,"0")):"") + " " + ap; }
 const overlaps=(a1,a2,b1,b2)=> a1<b2 && b1<a2;
 function todayDow(){ return (new Date().getDay()+6)%7; } // Mon=0
+function startOfDay(d){ const x=new Date(d); x.setHours(0,0,0,0); return x; }
+function mondayOf(d){ const x=startOfDay(d); const wd=(x.getDay()+6)%7; x.setDate(x.getDate()-wd); return x; }
+function addDays(d,n){ const x=new Date(d); x.setDate(x.getDate()+n); return x; }
+function isoDate(d){ const x=startOfDay(d); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); }
+function parseISODate(s){ if(!s) return null; const [y,m,d]=s.split("-").map(Number); return new Date(y,m-1,d); }
+function fmtDate(d){ return d.toLocaleDateString(undefined,{month:"short",day:"numeric"}); }
+function fmtDateFull(d){ return d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"}); }
+function weekDates(ws){ const out=[]; for(let i=0;i<7;i++) out.push(addDays(ws,i)); return out; }
+
+/* ---------- recurrence ---------- */
+function activeOnDate(a, date){
+  const iso=isoDate(date);
+  if(a.repeat==="once") return a.date===iso;
+  const wd=(date.getDay()+6)%7;
+  if(wd!==a.day) return false;
+  if(a.startDate && iso < a.startDate) return false;
+  if(a.endDate && iso > a.endDate) return false;
+  return true;
+}
+function passFilter(a){
+  if(ui.filter==="all") return true;
+  const [t,id]=ui.filter.split(":");
+  if(t==="kid") return a.kidId===id;
+  return a.trans && (a.dropId===id||a.pickId===id);
+}
 
 /* ---------- lookups ---------- */
 const kidById=id=> state.kids.find(k=>k.id===id);
 const drvById=id=> state.drivers.find(d=>d.id===id);
+const placeById=id=> state.places.find(p=>p.id===id);
+const vehById=id=> state.vehicles.find(v=>v.id===id);
 const kidName=id=>{ const k=kidById(id); return k?k.name:"?"; };
 const drvName=id=>{ const d=drvById(id); return d?d.name:""; };
+function placeName(id){ const p=placeById(id); return p?p.name:""; }
+function placeAddr(id){ const p=placeById(id); return p?p.address:""; }
+function driverHomeId(dId){ const d=drvById(dId); return d?d.homePlaceId:""; }
+function vehForLeg(act, driverId){ if(act.vehicleId) return act.vehicleId; const d=drvById(driverId); return d&&d.usualVehicleId?d.usualVehicleId:""; }
+
+/* ---------- fuel ---------- */
+function mostEfficient(){ const vs=state.vehicles.filter(v=>v.mpg>0); if(!vs.length) return null;
+  return vs.reduce((a,b)=> b.mpg>a.mpg?b:a); }
+function computeFuelHint(vehicleId, miles){
+  miles=+miles||0;
+  if(!state.vehicles.length) return "";
+  const best=mostEfficient();
+  if(miles<LONG_TRIP_MI){
+    const v=vehicleId?vehById(vehicleId):null;
+    if(v&&v.mpg) return "≈ "+(miles*2/v.mpg).toFixed(1)+" gal round trip in "+v.name;
+    return "";
+  }
+  if(!best) return "";
+  const chosen=vehicleId?vehById(vehicleId):null;
+  if(chosen&&chosen.id===best.id) return "⛽ Good pick — "+best.name+" is your most efficient ("+best.mpg+" mpg)";
+  const est=best.mpg?(" · ≈ "+(miles*2/best.mpg).toFixed(1)+" gal round trip"):"";
+  return "⛽ Long trip ("+miles+" mi one-way) — most efficient is "+best.name+" ("+best.mpg+" mpg)"+est;
+}
+function fuelHintFor(a){ const miles=+a.distMiles||0; if(miles<LONG_TRIP_MI) return ""; return computeFuelHint(a.vehicleId,miles); }
+
+/* ---------- directions ---------- */
+function dirUrl(originAddr, destAddr){
+  if(!originAddr && !destAddr) return "";
+  let u="https://www.google.com/maps/dir/?api=1";
+  if(originAddr) u+="&origin="+encodeURIComponent(originAddr);
+  if(destAddr)   u+="&destination="+encodeURIComponent(destAddr);
+  return u;
+}
 
 /* ================= SUPABASE SYNC ================= */
 let pushTimer=null, dirty=false, polling=false, everConnected=false;
@@ -413,7 +530,7 @@ async function cloudPull(){
       }
     }
     if(!dirty) setSync("ok","Synced");
-  }catch(e){ if(!dirty) setSync(everConnected?"off":"off","Offline"); }
+  }catch(e){ if(!dirty) setSync("off","Offline"); }
 }
 function startPolling(){ if(polling) return; polling=true; cloudPull(); setInterval(cloudPull,7000); }
 
@@ -422,122 +539,126 @@ function saveLocal(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); 
 function loadLocal(){ try{ const s=localStorage.getItem(LS_KEY); if(s) state=normalize(JSON.parse(s)); }catch(e){} }
 
 function normalize(s){
-  const d=defaultState();
-  s=s||{};
-  return {
-    title: s.title||d.title,
-    buffer: Number.isFinite(s.buffer)?s.buffer:d.buffer,
-    dayStart: s.dayStart||d.dayStart, dayEnd: s.dayEnd||d.dayEnd,
-    kids: Array.isArray(s.kids)?s.kids:[],
-    drivers: Array.isArray(s.drivers)?s.drivers:[],
-    acts: Array.isArray(s.acts)?s.acts.map(a=>({
-      id:a.id||rid("a"), kidId:a.kidId||"", name:a.name||"Activity", loc:a.loc||"",
-      day: clamp(a.day||0,0,6), start:a.start||960, end:a.end||1020,
-      trans: a.trans!==false, dropId:a.dropId||"", pickId:a.pickId||"", notes:a.notes||""
-    })):[],
-    updatedAt: s.updatedAt||0
-  };
+  const d=defaultState(); s=s||{};
+  const kids=Array.isArray(s.kids)?s.kids.map(k=>({id:k.id||rid("k"),name:k.name||"",color:k.color||KID_COLORS[0]})):[];
+  const drivers=Array.isArray(s.drivers)?s.drivers.map(dv=>({id:dv.id||rid("d"),name:dv.name||"",color:dv.color||DRV_COLORS[0],
+    homePlaceId:dv.homePlaceId||"",usualVehicleId:dv.usualVehicleId||""})):[];
+  const places=Array.isArray(s.places)?s.places.map(p=>({id:p.id||rid("p"),name:p.name||"",address:p.address||"",isHome:!!p.isHome})):[];
+  const vehicles=Array.isArray(s.vehicles)?s.vehicles.map(v=>({id:v.id||rid("v"),name:v.name||"",mpg:+v.mpg||0,fuel:v.fuel||"Gas"})):[];
+  function placeIdForName(nm){ if(!nm) return "";
+    const ex=places.find(p=>p.name.toLowerCase()===nm.toLowerCase()); if(ex) return ex.id;
+    const np={id:rid("p"),name:nm,address:"",isHome:false}; places.push(np); return np.id; }
+  const acts=Array.isArray(s.acts)?s.acts.map(a=>{
+    let placeId=a.placeId||""; if(!placeId && a.loc) placeId=placeIdForName(a.loc);
+    return { id:a.id||rid("a"), kidId:a.kidId||"", name:a.name||"Activity", placeId,
+      repeat:a.repeat==="once"?"once":"weekly", day:clamp(a.day||0,0,6),
+      date:a.date||"", startDate:a.startDate||"", endDate:a.endDate||"",
+      start:a.start||960, end:a.end||1020, trans:a.trans!==false,
+      dropId:a.dropId||"", pickId:a.pickId||"", dropFromId:a.dropFromId||"", pickToId:a.pickToId||"",
+      vehicleId:a.vehicleId||"", distMiles:(a.distMiles===0||a.distMiles)?+a.distMiles:null, notes:a.notes||"" };
+  }):[];
+  return { title:s.title||d.title, buffer:Number.isFinite(s.buffer)?s.buffer:d.buffer,
+    dayStart:s.dayStart||d.dayStart, dayEnd:s.dayEnd||d.dayEnd,
+    kids, drivers, places, vehicles, acts, updatedAt:s.updatedAt||0 };
 }
 
 /* ---------- mutations ---------- */
 function commit(){ saveLocal(); render(); schedulePush(); }
 
-/* ================= CONFLICT ENGINE ================= */
-function computeConflicts(){
-  const out=[];
-  const buf=state.buffer||15;
-  const acts=state.acts;
+/* ================= CONFLICT ENGINE (scoped to the viewed week) ================= */
+function computeConflicts(weekStart){
+  const out=[]; const buf=state.buffer||15;
+  const seenUnassigned=new Set();
+  weekDates(weekStart).forEach(date=>{
+    const dayLabel=fmtDateFull(date), iso=isoDate(date);
+    const acts=state.acts.filter(a=>activeOnDate(a,date));
 
-  // 1. Child double-booked
-  for(let i=0;i<acts.length;i++) for(let j=i+1;j<acts.length;j++){
-    const a=acts[i],b=acts[j];
-    if(a.kidId&&a.kidId===b.kidId && a.day===b.day && overlaps(a.start,a.end,b.start,b.end)){
-      out.push({sev:"danger",ic:"⛔",cat:"Child double-booked",
-        msg:`${kidName(a.kidId)} has two activities at once ${DOW_FULL[a.day]}`,
-        sub:`${a.name} (${label12(a.start)}) overlaps ${b.name} (${label12(b.start)})`,
-        ids:[a.id,b.id], day:a.day});
+    // 1. Child double-booked
+    for(let i=0;i<acts.length;i++) for(let j=i+1;j<acts.length;j++){
+      const a=acts[i],b=acts[j];
+      if(a.kidId&&a.kidId===b.kidId && overlaps(a.start,a.end,b.start,b.end)){
+        out.push({sev:"danger",ic:"⛔",cat:"Child double-booked",
+          msg:kidName(a.kidId)+" has two activities at once "+dayLabel,
+          sub:a.name+" ("+label12(a.start)+") overlaps "+b.name+" ("+label12(b.start)+")",
+          ids:[a.id,b.id]});
+      }
     }
-  }
+    // transport events
+    const T=[];
+    acts.forEach(a=>{ if(!a.trans) return;
+      T.push({actId:a.id,kidId:a.kidId,type:"drop",driverId:a.dropId,t:a.start,loc:a.placeId,name:a.name});
+      T.push({actId:a.id,kidId:a.kidId,type:"pick",driverId:a.pickId,t:a.end,loc:a.placeId,name:a.name});
+    });
+    const win=e=>[e.t-buf,e.t+buf];
 
-  // Build transport events
-  const T=[]; // {actId,kidId,type,driverId,day,t,loc,name}
-  for(const a of acts){ if(!a.trans) continue;
-    T.push({actId:a.id,kidId:a.kidId,type:"drop",driverId:a.dropId,day:a.day,t:a.start,loc:a.loc,name:a.name});
-    T.push({actId:a.id,kidId:a.kidId,type:"pick",driverId:a.pickId,day:a.day,t:a.end,loc:a.loc,name:a.name});
-  }
-  const win=e=>[e.t-buf,e.t+buf];
-
-  // 2. Driver double-booked (same driver, overlapping windows, different location)
-  const seenPair=new Set();
-  for(let i=0;i<T.length;i++) for(let j=i+1;j<T.length;j++){
-    const e=T[i],f=T[j];
-    if(!e.driverId||e.driverId!==f.driverId) continue;
-    if(e.day!==f.day) continue;
-    const [e1,e2]=win(e),[f1,f2]=win(f);
-    if(overlaps(e1,e2,f1,f2) && (e.loc||"")!==(f.loc||"")){
-      const key=[e.actId,f.actId,e.type,f.type].sort().join("|");
-      if(seenPair.has(key))continue; seenPair.add(key);
-      out.push({sev:"danger",ic:"🚗",cat:"Driver double-booked",
-        msg:`${drvName(e.driverId)} can't be in two places ${DOW_FULL[e.day]}`,
-        sub:`${verbText(e)} (${label12(e.t)}, ${e.loc||"?"}) & ${verbText(f)} (${label12(f.t)}, ${f.loc||"?"})`,
-        ids:[e.actId,f.actId], day:e.day});
+    // 2. Driver double-booked
+    const seen=new Set();
+    for(let i=0;i<T.length;i++) for(let j=i+1;j<T.length;j++){
+      const e=T[i],f=T[j];
+      if(!e.driverId||e.driverId!==f.driverId) continue;
+      const [e1,e2]=win(e),[f1,f2]=win(f);
+      if(overlaps(e1,e2,f1,f2) && (e.loc||"")!==(f.loc||"")){
+        const key=[e.actId,f.actId,e.type,f.type].sort().join("|");
+        if(seen.has(key))continue; seen.add(key);
+        out.push({sev:"danger",ic:"🚗",cat:"Driver double-booked",
+          msg:drvName(e.driverId)+" can't be in two places "+dayLabel,
+          sub:verbText(e)+" ("+label12(e.t)+", "+(placeName(e.loc)||"?")+") & "+verbText(f)+" ("+label12(f.t)+", "+(placeName(f.loc)||"?")+")",
+          ids:[e.actId,f.actId]});
+      }
     }
-  }
-
-  // 3. Transport crunch — cluster overlapping events per day; need >1 car
-  for(let day=0;day<7;day++){
-    const evs=T.filter(e=>e.day===day).sort((a,b)=>a.t-b.t);
+    // 3. Transport crunch
+    const evs=T.slice().sort((a,b)=>a.t-b.t);
     const used=new Array(evs.length).fill(false);
     for(let i=0;i<evs.length;i++){
       if(used[i])continue;
-      // greedily grow a cluster of mutually time-overlapping events
       const cluster=[evs[i]]; used[i]=true; let hi=win(evs[i])[1];
-      for(let j=i+1;j<evs.length;j++){
-        if(used[j])continue;
-        if(win(evs[j])[0] < hi){ cluster.push(evs[j]); used[j]=true; hi=Math.max(hi,win(evs[j])[1]); }
-      }
-      const locs=new Set(cluster.map(e=>e.loc||"(?)"));
-      if(locs.size<2) continue; // single place = fine (carpool)
+      for(let j=i+1;j<evs.length;j++){ if(used[j])continue; if(win(evs[j])[0]<hi){ cluster.push(evs[j]); used[j]=true; hi=Math.max(hi,win(evs[j])[1]); } }
+      const locs=new Set(cluster.map(e=>e.loc||"(none)"));
+      if(locs.size<2) continue;
       const drivers=new Set(cluster.filter(e=>e.driverId).map(e=>e.driverId));
-      const anyUnassigned=cluster.some(e=>!e.driverId);
-      if(drivers.size<locs.size || anyUnassigned){
+      const anyUn=cluster.some(e=>!e.driverId);
+      if(drivers.size<locs.size || anyUn){
         const tmid=cluster.reduce((s,e)=>s+e.t,0)/cluster.length;
         out.push({sev:"warn",ic:"🔀",cat:"Transport crunch",
-          msg:`${locs.size} places need a car around ${label12(Math.round(tmid))} ${DOW_FULL[day]}`,
-          sub:`${[...locs].join(" · ")} — only ${drivers.size} driver${drivers.size===1?"":"s"} assigned`,
-          ids:cluster.map(e=>e.actId), day});
+          msg:locs.size+" places need a car around "+label12(Math.round(tmid))+" "+dayLabel,
+          sub:[...locs].map(id=>placeName(id)||"(no place)").join(" · ")+" — only "+drivers.size+" driver"+(drivers.size===1?"":"s")+" assigned",
+          ids:cluster.map(e=>e.actId)});
       }
     }
-  }
-
-  // 4. Unassigned rides
-  for(const a of acts){ if(!a.trans)continue;
-    const miss=[]; if(!a.dropId)miss.push("drop-off"); if(!a.pickId)miss.push("pick-up");
-    if(miss.length) out.push({sev:"warn",ic:"❓",cat:"Ride not assigned",
-      msg:`${a.name} — no ${miss.join(" or ")} driver`,
-      sub:`${kidName(a.kidId)} · ${DOW_FULL[a.day]} ${label12(a.start)}${a.loc?" · "+a.loc:""}`,
-      ids:[a.id], day:a.day});
-  }
-
-  const order={danger:0,warn:1};
-  out.sort((x,y)=> (order[x.sev]-order[y.sev]));
+    // 4. Unassigned rides (once per activity across the week)
+    acts.forEach(a=>{ if(!a.trans || seenUnassigned.has(a.id)) return;
+      const miss=[]; if(!a.dropId)miss.push("drop-off"); if(!a.pickId)miss.push("pick-up");
+      if(miss.length){ seenUnassigned.add(a.id);
+        out.push({sev:"warn",ic:"❓",cat:"Ride not assigned",
+          msg:a.name+" — no "+miss.join(" or ")+" driver",
+          sub:kidName(a.kidId)+" · "+(a.repeat==="once"?fmtDateFull(date):DOW_FULL[a.day])+" "+label12(a.start)+(a.placeId?" · "+placeName(a.placeId):""),
+          ids:[a.id]});
+      }
+    });
+  });
+  const order={danger:0,warn:1}; out.sort((x,y)=>order[x.sev]-order[y.sev]);
   return out;
 }
 function verbText(e){ return (e.type==="drop"?"drop off ":"pick up ")+kidName(e.kidId); }
 
 /* ================= RENDER ================= */
 function render(){
-  renderFilter();
-  renderConflicts();
-  renderFilterInfo();
+  renderFilter(); renderWeekNav(); renderFilterInfo(); renderConflicts();
   if(ui.view==="week") renderWeek(); else renderAgenda();
   document.getElementById("segWeek").classList.toggle("on",ui.view==="week");
   document.getElementById("segAgenda").classList.toggle("on",ui.view==="agenda");
 }
 
+function renderWeekNav(){
+  const dates=weekDates(ui.weekStart);
+  const isThis=isoDate(ui.weekStart)===isoDate(mondayOf(new Date()));
+  document.getElementById("lblWeek").innerHTML=esc(fmtDate(dates[0])+" – "+fmtDate(dates[6]))+
+    "<small>"+(isThis?"This week":dates[0].getFullYear())+"</small>";
+  document.getElementById("btnToday").style.visibility=isThis?"hidden":"visible";
+}
+
 function renderFilter(){
-  const sel=document.getElementById("filter");
-  const cur=ui.filter;
+  const sel=document.getElementById("filter"); const cur=ui.filter;
   let h=`<option value="all">👀 Everyone</option>`;
   if(state.kids.length){ h+=`<optgroup label="Children">`+
     state.kids.map(k=>`<option value="kid:${k.id}">${esc(k.name)}</option>`).join("")+`</optgroup>`; }
@@ -546,36 +667,28 @@ function renderFilter(){
   sel.innerHTML=h; sel.value=cur;
   if(sel.value!==cur){ ui.filter="all"; sel.value="all"; }
 }
+function actsThisWeek(){ const dates=weekDates(ui.weekStart); const set=new Set();
+  dates.forEach(dt=>state.acts.forEach(a=>{ if(activeOnDate(a,dt)&&passFilter(a)) set.add(a.id); })); return set.size; }
 function renderFilterInfo(){
-  const el=document.getElementById("filterinfo");
-  if(ui.filter==="all"){ el.innerHTML=`<b>${state.acts.length}</b> activit${state.acts.length===1?"y":"ies"} · <b>${state.kids.length}</b> kid${state.kids.length===1?"":"s"}`; return; }
+  const el=document.getElementById("filterinfo"); const n=actsThisWeek();
+  const wk=`<b>${n}</b> this week`;
+  if(ui.filter==="all"){ el.innerHTML=`${wk} · <b>${state.kids.length}</b> kid${state.kids.length===1?"":"s"}`; return; }
   const [t,id]=ui.filter.split(":");
-  if(t==="kid") el.innerHTML=`Showing <b>${esc(kidName(id))}</b>'s activities`;
-  else el.innerHTML=`Showing <b>${esc(drvName(id))}</b>'s ride list 🚗`;
-}
-
-/* which acts pass the current filter */
-function filteredActs(){
-  if(ui.filter==="all") return state.acts.slice();
-  const [t,id]=ui.filter.split(":");
-  if(t==="kid") return state.acts.filter(a=>a.kidId===id);
-  // driver: activities where they drop or pick
-  return state.acts.filter(a=>a.trans&&(a.dropId===id||a.pickId===id));
+  if(t==="kid") el.innerHTML=`<b>${esc(kidName(id))}</b> · ${wk}`;
+  else el.innerHTML=`<b>${esc(drvName(id))}</b>'s rides 🚗 · ${wk}`;
 }
 
 function renderConflicts(){
   const box=document.getElementById("conflicts");
   if(!state.kids.length){ box.innerHTML=""; return; }
-  const cs=computeConflicts();
-  if(!cs.length){ box.innerHTML=`<div class="allclear">✅ No conflicts — everyone's covered.</div>`; return; }
-  box.innerHTML=`<div class="cf-head">${cs.length} thing${cs.length===1?"":"s"} to resolve</div>`+
+  const cs=computeConflicts(ui.weekStart);
+  if(!cs.length){ box.innerHTML=`<div class="allclear">✅ No conflicts this week — everyone's covered.</div>`; return; }
+  box.innerHTML=`<div class="cf-head">${cs.length} thing${cs.length===1?"":"s"} to resolve this week</div>`+
     cs.map((c,i)=>`<div class="cf ${c.sev}" data-cf="${i}">
       <span class="ic">${c.ic}</span>
       <div class="msg"><b>${c.cat}:</b> ${esc(c.msg)}<small>${esc(c.sub)}</small></div>
     </div>`).join("");
-  [...box.querySelectorAll(".cf")].forEach((el,i)=>{
-    el.onclick=()=>jumpTo(cs[i]);
-  });
+  [...box.querySelectorAll(".cf")].forEach((el,i)=> el.onclick=()=>jumpTo(cs[i]));
 }
 function jumpTo(c){
   if(ui.view!=="week"){ ui.view="week"; render(); }
@@ -585,7 +698,7 @@ function jumpTo(c){
 }
 function flashNow(){
   document.querySelectorAll(".ev.flash").forEach(e=>e.classList.remove("flash"));
-  ui.flashIds.forEach(id=>{ const e=document.querySelector(`.ev[data-id="${id}"]`); if(e){ e.classList.add("flash"); } });
+  ui.flashIds.forEach(id=>{ const e=document.querySelector(`.ev[data-id="${id}"]`); if(e) e.classList.add("flash"); });
   setTimeout(()=>ui.flashIds=[],1500);
 }
 
@@ -593,81 +706,67 @@ function flashNow(){
 function renderWeek(){
   const v=document.getElementById("view");
   if(!state.kids.length){ v.innerHTML=emptyState(); wireEmpty(); return; }
-  const acts=filteredActs();
   const ds=state.dayStart, de=state.dayEnd, H=(de-ds)*PXMIN;
-  const td=todayDow();
-  let cells="";
-  // corner + headers
+  const dates=weekDates(ui.weekStart); const todayIso=isoDate(new Date());
   let head=`<div class="gcorner ghead"></div>`;
-  for(let d=0;d<7;d++){
-    head+=`<div class="ghead ${d===td?"today":""}"><span class="dow">${DOW[d]}</span>${d===td?"Today":DOW_FULL[d].slice(0,3)}</div>`;
-  }
-  // time column
+  dates.forEach((date,d)=>{
+    const isT=isoDate(date)===todayIso;
+    head+=`<div class="ghead ${isT?"today":""}"><span class="dow">${DOW[d]}</span>${esc(fmtDate(date))}</div>`;
+  });
   let timecol=`<div class="timecol daycol" style="height:${H}px">`;
-  for(let m=Math.ceil(ds/60)*60;m<=de;m+=60){
-    const y=(m-ds)*PXMIN;
-    timecol+=`<div class="hourline" style="top:${y}px"></div><div class="hourlabel" style="top:${y}px">${label12(m)}</div>`;
-  }
+  for(let m=Math.ceil(ds/60)*60;m<=de;m+=60){ const y=(m-ds)*PXMIN;
+    timecol+=`<div class="hourline" style="top:${y}px"></div><div class="hourlabel" style="top:${y}px">${label12(m)}</div>`; }
   timecol+=`</div>`;
-  // day columns
+  const nowMin=new Date().getHours()*60+new Date().getMinutes();
   let cols="";
-  const nowMin = new Date().getHours()*60+new Date().getMinutes();
-  for(let d=0;d<7;d++){
+  dates.forEach((date,d)=>{
+    const isT=isoDate(date)===todayIso;
     let col=`<div class="daycol" style="height:${H}px">`;
     for(let m=Math.ceil(ds/60)*60;m<=de;m+=60){ col+=`<div class="hourline" style="top:${(m-ds)*PXMIN}px"></div>`; }
-    if(d===td && nowMin>=ds && nowMin<=de) col+=`<div class="nowline" style="top:${(nowMin-ds)*PXMIN}px"></div>`;
-    // layout overlapping events side by side
-    const dayActs=acts.filter(a=>a.day===d).sort((a,b)=>a.start-b.start||a.end-b.end);
-    const cols_=packColumns(dayActs);
+    if(isT && nowMin>=ds && nowMin<=de) col+=`<div class="nowline" style="top:${(nowMin-ds)*PXMIN}px"></div>`;
+    const dayActs=state.acts.filter(a=>activeOnDate(a,date)&&passFilter(a)).sort((a,b)=>a.start-b.start||a.end-b.end);
+    const packed=packColumns(dayActs);
     dayActs.forEach(a=>{
       const top=(clamp(a.start,ds,de)-ds)*PXMIN;
       const h=Math.max((clamp(a.end,ds,de)-clamp(a.start,ds,de))*PXMIN, 26);
       const k=kidById(a.kidId); const color=k?k.color:"#888";
-      const info=cols_[a.id]; const wpct=100/info.n; const left=info.i*wpct;
+      const info=packed[a.id]; const wpct=100/info.n; const left=info.i*wpct;
       col+=`<div class="ev" data-id="${a.id}" style="top:${top}px;height:${h}px;background:${color};
         left:calc(${left}% + 2px);width:calc(${wpct}% - 4px)">
         ${warnBadge(a)}
         <div class="en">${esc(a.name)}</div>
-        <div class="esub">${label12(a.start)}–${label12(a.end)}${a.loc?" · "+esc(a.loc):""}</div>
+        <div class="esub">${label12(a.start)}–${label12(a.end)}${a.placeId?" · "+esc(placeName(a.placeId)):""}</div>
         ${a.trans?transChips(a):""}
       </div>`;
     });
     col+=`</div>`; cols+=col;
-  }
+  });
   v.innerHTML=`<div class="gridscroll"><div class="grid">${head}${timecol}${cols}</div></div>`;
   [...v.querySelectorAll(".ev")].forEach(el=> el.onclick=()=>openAct(el.dataset.id));
   if(ui.flashIds.length) flashNow();
 }
-function warnBadge(a){
-  if(a.trans && (!a.dropId||!a.pickId)) return `<span class="warnbadge">❓</span>`;
-  return "";
-}
+function warnBadge(a){ return (a.trans && (!a.dropId||!a.pickId))?`<span class="warnbadge">❓</span>`:""; }
 function transChips(a){
-  const dp = a.dropId? `<span class="chip">⬇ ${esc(drvName(a.dropId))}</span>` : `<span class="chip miss">⬇ ?</span>`;
-  const pk = a.pickId? `<span class="chip">⬆ ${esc(drvName(a.pickId))}</span>` : `<span class="chip miss">⬆ ?</span>`;
-  return `<div class="etr">${dp}${pk}</div>`;
+  const dp=a.dropId?`<span class="chip">⬇ ${esc(drvName(a.dropId))}</span>`:`<span class="chip miss">⬇ ?</span>`;
+  const pk=a.pickId?`<span class="chip">⬆ ${esc(drvName(a.pickId))}</span>`:`<span class="chip miss">⬆ ?</span>`;
+  const veh=(a.vehicleId&&vehById(a.vehicleId))?`<span class="chip veh">🚗 ${esc(vehById(a.vehicleId).name)}</span>`:"";
+  const fuel=fuelHintFor(a)?`<span class="chip veh">⛽</span>`:"";
+  return `<div class="etr">${dp}${pk}${veh}${fuel}</div>`;
 }
-/* Column packing per day: greedy column assignment, then widen each event to
-   the number of columns used by its connected overlap-cluster so blocks that
-   overlap in time never collide visually. dayActs must be sorted by start. */
+/* Column packing (unchanged): greedy columns, widen to overlap-cluster count. */
 function packColumns(dayActs){
-  const res={};
-  const colEnds=[];                       // running end time of each column
+  const res={}; const colEnds=[];
   dayActs.forEach(a=>{
     let placed=-1;
     for(let c=0;c<colEnds.length;c++){ if(colEnds[c]<=a.start){ colEnds[c]=a.end; placed=c; break; } }
     if(placed<0){ colEnds.push(a.end); placed=colEnds.length-1; }
     res[a.id]={i:placed};
   });
-  // sweep into clusters connected by overlap; all share the cluster's column count
   let cluster=[], maxEnd=-1;
   const finalize=()=>{ if(!cluster.length) return;
-    const n=cluster.reduce((m,a)=>Math.max(m,res[a.id].i),0)+1;
-    cluster.forEach(a=>res[a.id].n=n); };
-  dayActs.forEach(a=>{
-    if(cluster.length && a.start>=maxEnd){ finalize(); cluster=[]; maxEnd=-1; }
-    cluster.push(a); maxEnd=Math.max(maxEnd,a.end);
-  });
+    const n=cluster.reduce((m,a)=>Math.max(m,res[a.id].i),0)+1; cluster.forEach(a=>res[a.id].n=n); };
+  dayActs.forEach(a=>{ if(cluster.length && a.start>=maxEnd){ finalize(); cluster=[]; maxEnd=-1; }
+    cluster.push(a); maxEnd=Math.max(maxEnd,a.end); });
   finalize();
   return res;
 }
@@ -676,76 +775,104 @@ function packColumns(dayActs){
 function renderAgenda(){
   const v=document.getElementById("view");
   if(!state.kids.length){ v.innerHTML=emptyState(); wireEmpty(); return; }
-  const isDriver = ui.filter.startsWith("drv:");
-  const driverId = isDriver? ui.filter.split(":")[1] : null;
-  const td=todayDow();
-  let html=`<div class="agenda">`;
-  let any=false;
-  for(let d=0;d<7;d++){
+  const isDriver=ui.filter.startsWith("drv:");
+  const driverId=isDriver?ui.filter.split(":")[1]:null;
+  const dates=weekDates(ui.weekStart); const todayIso=isoDate(new Date());
+  let html=`<div class="agenda">`; let any=false;
+  dates.forEach(date=>{
+    const isT=isoDate(date)===todayIso;
     let items;
     if(isDriver){
       items=[];
-      state.acts.filter(a=>a.day===d&&a.trans).forEach(a=>{
+      state.acts.filter(a=>activeOnDate(a,date)&&a.trans).forEach(a=>{
         if(a.dropId===driverId) items.push({t:a.start,type:"drop",a});
         if(a.pickId===driverId) items.push({t:a.end,type:"pick",a});
       });
       items.sort((x,y)=>x.t-y.t);
     }else{
-      items=filteredActs().filter(a=>a.day===d).sort((a,b)=>a.start-b.start).map(a=>({t:a.start,a}));
+      items=state.acts.filter(a=>activeOnDate(a,date)&&passFilter(a)).sort((a,b)=>a.start-b.start).map(a=>({t:a.start,a}));
     }
-    if(!items.length) continue;
+    if(!items.length) return;
     any=true;
-    html+=`<div class="aday ${d===td?"today":""}"><h3>${DOW_FULL[d]} ${d===td?'<span class="cnt">· Today</span>':""}<span class="spacer" style="flex:1"></span><span class="cnt">${items.length} ${isDriver?"ride"+(items.length>1?"s":""):"item"+(items.length>1?"s":"")}</span></h3>`;
-    items.forEach(it=>{
-      html+= isDriver? driverTaskCard(it) : activityCard(it.a);
-    });
+    const noun=isDriver?"ride":"item";
+    html+=`<div class="aday ${isT?"today":""}"><h3>${esc(fmtDateFull(date))}${isT?' <span class="cnt">· Today</span>':""}<span class="spacer" style="flex:1"></span><span class="cnt">${items.length} ${noun}${items.length>1?"s":""}</span></h3>`;
+    items.forEach(it=>{ html+= isDriver? driverTaskCard(it) : activityCard(it.a); });
     html+=`</div>`;
-  }
+  });
   html+=`</div>`;
-  if(!any) html=`<div class="empty"><h2>Nothing scheduled${ui.filter!=="all"?" for this person":""}</h2><p>Add an activity to get started.</p></div>`;
+  if(!any) html=`<div class="empty"><h2>Nothing scheduled this week${ui.filter!=="all"?" for this person":""}</h2><p>Use ‹ › to change weeks, or add an activity.</p></div>`;
   v.innerHTML=html;
-  [...v.querySelectorAll("[data-id]")].forEach(el=> el.onclick=()=>openAct(el.dataset.id));
+  [...v.querySelectorAll("[data-id]")].forEach(el=> el.onclick=(e)=>{ if(e.target.closest("a")) return; openAct(el.dataset.id); });
+}
+function recurLabel(a){
+  if(a.repeat==="once") return a.date?("One-time · "+fmtDateFull(parseISODate(a.date))):"One-time";
+  const wd=DOW_FULL[a.day]+"s";
+  if(a.startDate||a.endDate){
+    const s=a.startDate?fmtDate(parseISODate(a.startDate)):"…";
+    const e=a.endDate?fmtDate(parseISODate(a.endDate)):"ongoing";
+    return wd+" · "+s+"–"+e;
+  }
+  return wd+" · weekly";
 }
 function activityCard(a){
   const k=kidById(a.kidId); const color=k?k.color:"#888";
-  let trans="";
+  const pname=placeName(a.placeId), addr=placeAddr(a.placeId);
+  let trans;
   if(a.trans){
-    const dp=a.dropId?`<span class="tpill"><span>⬇ Drop-off</span><span class="who">${esc(drvName(a.dropId))}</span></span>`:`<span class="tpill miss">⬇ Drop-off: none</span>`;
-    const pk=a.pickId?`<span class="tpill"><span>⬆ Pick-up</span><span class="who">${esc(drvName(a.pickId))}</span></span>`:`<span class="tpill miss">⬆ Pick-up: none</span>`;
+    const dp=a.dropId?`<span class="tpill">⬇ Drop-off <span class="who">${esc(drvName(a.dropId))}</span></span>`:`<span class="tpill miss">⬇ Drop-off: none</span>`;
+    const pk=a.pickId?`<span class="tpill">⬆ Pick-up <span class="who">${esc(drvName(a.pickId))}</span></span>`:`<span class="tpill miss">⬆ Pick-up: none</span>`;
     trans=`<div class="atrans">${dp}${pk}</div>`;
   }else trans=`<div class="atrans"><span class="tpill">🏠 No ride needed</span></div>`;
+  const origAddr=a.trans?placeAddr(a.dropFromId||driverHomeId(a.dropId)):"";
+  const url=dirUrl(origAddr,addr);
+  const dir=addr?`<a class="dirbtn" href="${url}" target="_blank" rel="noopener">🧭 Directions</a>`:"";
+  const veh=(a.vehicleId&&vehById(a.vehicleId));
+  const vehLine=veh?`<div class="vehline">🚗 ${esc(veh.name)}${veh.mpg?` · ${veh.mpg} mpg`:""}</div>`:"";
+  const fh=fuelHintFor(a); const fuel=fh?`<div class="fuelhint">${esc(fh)}</div>`:"";
   return `<div class="acard" data-id="${a.id}">
     <div class="atime">${label12(a.start)}<small>${label12(a.end)}</small></div>
     <div class="abody">
       <div><span class="akid"><span class="kiddot" style="background:${color}"></span>${esc(kidName(a.kidId))}</span><span class="aname">${esc(a.name)}</span></div>
-      ${a.loc?`<div class="aloc">📍 ${esc(a.loc)}</div>`:""}
+      <div class="aloc" style="text-transform:none">${esc(recurLabel(a))}</div>
+      ${pname?`<div class="aloc">📍 ${esc(pname)}${addr?" — "+esc(addr):""}</div>`:""}
       ${a.notes?`<div class="aloc">📝 ${esc(a.notes)}</div>`:""}
-      ${trans}
+      ${trans}${vehLine}${fuel}
+      ${dir?`<div class="atrans" style="margin-top:6px">${dir}</div>`:""}
     </div></div>`;
 }
 function driverTaskCard(it){
-  const a=it.a; const k=kidById(a.kidId); const color=k?k.color:"#888";
-  const drop=it.type==="drop";
+  const a=it.a; const drop=it.type==="drop"; const driverId=drop?a.dropId:a.pickId;
+  const k=kidById(a.kidId); const color=k?k.color:"#888";
+  const homeId=driverHomeId(driverId);
+  const origId=drop?(a.dropFromId||homeId):a.placeId;
+  const destId=drop?a.placeId:(a.pickToId||homeId);
+  const origAddr=placeAddr(origId), destAddr=placeAddr(destId);
   const verb=drop?`<span class="verb drop">Drop off</span>`:`<span class="verb pick">Pick up</span>`;
-  const line=drop
-    ? `Get <b>${esc(kidName(a.kidId))}</b> to <b>${esc(a.name)}</b>`
-    : `Collect <b>${esc(kidName(a.kidId))}</b> from <b>${esc(a.name)}</b>`;
+  const line=drop?`Get <b>${esc(kidName(a.kidId))}</b> to <b>${esc(a.name)}</b>`:`Collect <b>${esc(kidName(a.kidId))}</b> from <b>${esc(a.name)}</b>`;
   const when=drop?`Arrive by ${label12(a.start)}`:`Ready at ${label12(a.end)}`;
+  const route=(origId||destId)?`<div class="tmeta">${esc(placeName(origId)||"—")} → <b>${esc(placeName(destId)||"—")}</b></div>`:"";
+  const vId=vehForLeg(a,driverId); const vObj=vId?vehById(vId):null;
+  const vehLine=vObj?`<div class="vehline">🚗 ${esc(vObj.name)}${vObj.mpg?` · ${vObj.mpg} mpg`:""}</div>`:"";
+  const url=dirUrl(origAddr,destAddr);
+  const dir=url?`<a class="dirbtn" href="${url}" target="_blank" rel="noopener">🧭 Directions</a>`:"";
+  const fh=fuelHintFor(a); const fuel=fh?`<div class="fuelhint">${esc(fh)}</div>`:"";
   return `<div class="acard taskcard" data-id="${a.id}">
     <div class="atime">${label12(it.t)}</div>
     <div class="abody">
       <div class="big">${verb}<span class="kiddot" style="background:${color}"></span> ${line}</div>
-      <div class="tmeta">${when}${a.loc?` · 📍 ${esc(a.loc)}`:""}</div>
+      <div class="tmeta">${when}${destAddr?` · 📍 ${esc(destAddr)}`:(placeName(destId)?` · 📍 ${esc(placeName(destId))}`:"")}</div>
+      ${route}${vehLine}${fuel}
       ${a.notes?`<div class="tmeta">📝 ${esc(a.notes)}</div>`:""}
+      ${dir?`<div class="atrans" style="margin-top:6px">${dir}</div>`:""}
     </div></div>`;
 }
 
 function emptyState(){
   return `<div class="empty">
     <h2>Let's set up your family 👋</h2>
-    <p>Add your kids and drivers first, then start adding activities.<br>Everything auto-syncs to anyone you share the link with.</p>
+    <p>Add your kids, drivers, places and vehicles in <b>Setup</b>, then start adding activities.<br>Everything auto-syncs to anyone you share the link with.</p>
     <div style="margin-top:14px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-      <button class="btn primary" id="emAddPeople">👨‍👩‍👧 Add people</button>
+      <button class="btn primary" id="emAddPeople">🛠 Open Setup</button>
       <button class="btn" id="emAddAct">＋ Add activity</button>
     </div></div>`;
 }
@@ -760,132 +887,220 @@ function fillDriverSelect(sel,val){
     state.drivers.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join("");
   sel.value=val||"";
 }
+function fillPlaceSelect(sel,val,mode){
+  const first= mode==="home"? `<option value="">🏠 Driver's home</option>` : `<option value="">— none —</option>`;
+  sel.innerHTML=first+state.places.map(p=>`<option value="${p.id}">${esc(p.name||"(unnamed)")}</option>`).join("");
+  sel.value=val||"";
+}
+function fillVehSelect(sel,val){
+  sel.innerHTML=`<option value="">— Driver's usual —</option>`+
+    state.vehicles.map(v=>`<option value="${v.id}">${esc(v.name||"(unnamed)")}${v.mpg?" ("+v.mpg+" mpg)":""}</option>`).join("");
+  sel.value=val||"";
+}
+function applyRepeatUI(){
+  const weekly=ui.editRepeat==="weekly";
+  document.getElementById("fRepWeekly").classList.toggle("on",weekly);
+  document.getElementById("fRepOnce").classList.toggle("on",!weekly);
+  document.getElementById("weeklyBlock").style.display=weekly?"":"none";
+  document.getElementById("onceBlock").style.display=weekly?"none":"";
+}
 function openAct(id){
   if(!state.kids.length){ toast("Add a child first"); openManage(); return; }
   ui.editingId=id;
-  const a = id? state.acts.find(x=>x.id===id) : null;
-  document.getElementById("actTitle").textContent = a?"Edit activity":"Add activity";
+  const a=id?state.acts.find(x=>x.id===id):null;
+  document.getElementById("actTitle").textContent=a?"Edit activity":"Add activity";
   const kSel=document.getElementById("fKid");
   kSel.innerHTML=state.kids.map(k=>`<option value="${k.id}">${esc(k.name)}</option>`).join("");
-  kSel.value = a? a.kidId : state.kids[0].id;
-  document.getElementById("fName").value = a? a.name : "";
-  document.getElementById("fLoc").value = a? a.loc : "";
-  ui.editDow = a? a.day : todayDow();
-  renderDow();
-  document.getElementById("fStart").value = toHHMM(a? a.start : 960);
-  document.getElementById("fEnd").value = toHHMM(a? a.end : 1020);
-  const tr = a? a.trans : true;
-  document.getElementById("fTrans").checked = tr;
-  toggleTrans(tr);
+  kSel.value=a?a.kidId:state.kids[0].id;
+  document.getElementById("fName").value=a?a.name:"";
+  fillPlaceSelect(document.getElementById("fPlace"), a?a.placeId:"", "none");
+  hideNewPlace();
+  ui.editRepeat=a?a.repeat:"weekly"; applyRepeatUI();
+  ui.editDow=a?a.day:todayDow(); renderDow();
+  document.getElementById("fStartDate").value=a?a.startDate:"";
+  document.getElementById("fEndDate").value=a?a.endDate:"";
+  document.getElementById("fDate").value=(a&&a.repeat==="once"&&a.date)?a.date:isoDate(new Date());
+  document.getElementById("fStart").value=toHHMM(a?a.start:960);
+  document.getElementById("fEnd").value=toHHMM(a?a.end:1020);
+  const tr=a?a.trans:true;
+  document.getElementById("fTrans").checked=tr; toggleTrans(tr);
   fillDriverSelect(document.getElementById("fDrop"), a?a.dropId:"");
   fillDriverSelect(document.getElementById("fPick"), a?a.pickId:"");
-  document.getElementById("fNotes").value = a? a.notes : "";
-  document.getElementById("fDelete").style.display = a? "" : "none";
+  fillPlaceSelect(document.getElementById("fDropFrom"), a?a.dropFromId:"", "home");
+  fillPlaceSelect(document.getElementById("fPickTo"), a?a.pickToId:"", "home");
+  fillVehSelect(document.getElementById("fVeh"), a?a.vehicleId:"");
+  document.getElementById("fDist").value=(a&&a.distMiles!=null)?a.distMiles:"";
+  updateFuelHint();
+  document.getElementById("fNotes").value=a?a.notes:"";
+  document.getElementById("fDelete").style.display=a?"":"none";
   showOverlay("ovAct");
   setTimeout(()=>document.getElementById("fName").focus(),50);
 }
 function renderDow(){
-  document.getElementById("fDow").innerHTML = DOW.map((d,i)=>
-    `<button type="button" data-d="${i}" class="${i===ui.editDow?"on":""}">${d}</button>`).join("");
+  document.getElementById("fDow").innerHTML=DOW.map((d,i)=>`<button type="button" data-d="${i}" class="${i===ui.editDow?"on":""}">${d}</button>`).join("");
   [...document.querySelectorAll("#fDow button")].forEach(b=>b.onclick=()=>{ ui.editDow=+b.dataset.d; renderDow(); });
 }
 function toggleTrans(on){ document.getElementById("transbox").classList.toggle("off",!on); }
+function updateFuelHint(){
+  const el=document.getElementById("fFuelHint");
+  const txt=computeFuelHint(document.getElementById("fVeh").value, document.getElementById("fDist").value);
+  if(txt){ el.textContent=txt; el.style.display=""; } else { el.style.display="none"; }
+}
+function showNewPlace(){ document.getElementById("fNewPlace").style.display="";
+  setTimeout(()=>document.getElementById("fNewPlaceName").focus(),30); }
+function hideNewPlace(){ document.getElementById("fNewPlace").style.display="none";
+  document.getElementById("fNewPlaceName").value=""; document.getElementById("fNewPlaceAddr").value=""; }
+function saveNewPlace(){
+  const name=document.getElementById("fNewPlaceName").value.trim();
+  if(!name){ toast("Name the place"); return; }
+  const p={id:rid("p"),name,address:document.getElementById("fNewPlaceAddr").value.trim(),isHome:false};
+  state.places.push(p); saveLocal(); schedulePush();
+  const keepFrom=document.getElementById("fDropFrom").value, keepTo=document.getElementById("fPickTo").value;
+  fillPlaceSelect(document.getElementById("fPlace"), p.id, "none");
+  fillPlaceSelect(document.getElementById("fDropFrom"), keepFrom, "home");
+  fillPlaceSelect(document.getElementById("fPickTo"), keepTo, "home");
+  hideNewPlace();
+}
 function saveAct(){
   const name=document.getElementById("fName").value.trim();
   if(!name){ toast("Give the activity a name"); return; }
-  let start=toMin(document.getElementById("fStart").value);
-  let end=toMin(document.getElementById("fEnd").value);
-  if(end<=start){ end=start+60; }
-  const rec={
-    kidId:document.getElementById("fKid").value,
-    name, loc:document.getElementById("fLoc").value.trim(),
-    day:ui.editDow, start, end,
+  let start=toMin(document.getElementById("fStart").value), end=toMin(document.getElementById("fEnd").value);
+  if(end<=start) end=start+60;
+  const repeat=ui.editRepeat; let day=ui.editDow, date="", startDate="", endDate="";
+  if(repeat==="once"){
+    date=document.getElementById("fDate").value;
+    if(!date){ toast("Pick a date for the one-time event"); return; }
+    day=(parseISODate(date).getDay()+6)%7;
+  }else{
+    startDate=document.getElementById("fStartDate").value||"";
+    endDate=document.getElementById("fEndDate").value||"";
+    if(startDate&&endDate&&endDate<startDate){ toast("End date is before the start date"); return; }
+  }
+  const distRaw=document.getElementById("fDist").value.trim();
+  const distMiles=distRaw===""?null:(isFinite(+distRaw)&&+distRaw>=0?+distRaw:null);
+  const rec={ kidId:document.getElementById("fKid").value, name, placeId:document.getElementById("fPlace").value,
+    repeat, day, date, startDate, endDate, start, end,
     trans:document.getElementById("fTrans").checked,
-    dropId:document.getElementById("fDrop").value,
-    pickId:document.getElementById("fPick").value,
-    notes:document.getElementById("fNotes").value.trim()
-  };
-  // auto-expand grid range if needed
-  if(start < state.dayStart) state.dayStart = Math.floor(start/60)*60;
-  if(end   > state.dayEnd)   state.dayEnd   = Math.ceil(end/60)*60;
-  if(ui.editingId){ const a=state.acts.find(x=>x.id===ui.editingId); Object.assign(a,rec); }
+    dropId:document.getElementById("fDrop").value, pickId:document.getElementById("fPick").value,
+    dropFromId:document.getElementById("fDropFrom").value, pickToId:document.getElementById("fPickTo").value,
+    vehicleId:document.getElementById("fVeh").value, distMiles, notes:document.getElementById("fNotes").value.trim() };
+  if(start<state.dayStart) state.dayStart=Math.floor(start/60)*60;
+  if(end>state.dayEnd) state.dayEnd=Math.ceil(end/60)*60;
+  if(ui.editingId){ Object.assign(state.acts.find(x=>x.id===ui.editingId),rec); }
   else state.acts.push(Object.assign({id:rid("a")},rec));
   hideOverlay("ovAct"); commit();
 }
-function deleteAct(){
-  if(!ui.editingId) return;
-  state.acts=state.acts.filter(a=>a.id!==ui.editingId);
-  hideOverlay("ovAct"); commit();
-}
+function deleteAct(){ if(!ui.editingId) return;
+  state.acts=state.acts.filter(a=>a.id!==ui.editingId); hideOverlay("ovAct"); commit(); }
 
-/* ================= MANAGE MODAL ================= */
+/* ================= SETUP MODAL ================= */
 function openManage(){ renderManage(); showOverlay("ovManage"); }
+function emptyHint(t){ return `<div class="hint">${esc(t)}</div>`; }
+function swatchesHtml(pal,cur){ return pal.map(c=>`<span class="sw ${c===cur?"on":""}" data-c="${c}" style="background:${c}"></span>`).join(""); }
+function placeOptions(val){ return `<option value="">— none —</option>`+state.places.map(p=>`<option value="${p.id}" ${p.id===val?"selected":""}>${esc(p.name||"(unnamed)")}</option>`).join(""); }
+function vehOptions(val){ return `<option value="">— none —</option>`+state.vehicles.map(v=>`<option value="${v.id}" ${v.id===val?"selected":""}>${esc(v.name||"(unnamed)")}</option>`).join(""); }
+function kidRowHtml(k){ return `<div class="mrow" data-id="${k.id}">
+    <span class="swatches">${swatchesHtml(KID_COLORS,k.color)}</span>
+    <input class="name" value="${esc(k.name)}" placeholder="Child's name">
+    <button class="btn danger sm del">✕</button></div>`; }
+function drvCardHtml(d){ return `<div class="drvcard" data-id="${d.id}">
+    <div class="top"><span class="swatches">${swatchesHtml(DRV_COLORS,d.color)}</span>
+      <input class="name" value="${esc(d.name)}" placeholder="Driver's name">
+      <button class="btn danger sm del">✕</button></div>
+    <div class="sub">
+      <div><label>Leaves from (home)</label><select data-f="home">${placeOptions(d.homePlaceId)}</select></div>
+      <div><label>Usual vehicle</label><select data-f="veh">${vehOptions(d.usualVehicleId)}</select></div>
+    </div></div>`; }
+function placeRowHtml(p){ return `<div class="prow" data-id="${p.id}">
+    <input class="pn" data-f="name" value="${esc(p.name)}" placeholder="Name">
+    <input class="pa" data-f="address" value="${esc(p.address)}" placeholder="Full address">
+    <button class="btn danger sm del">✕</button></div>`; }
+function vehRowHtml(v){ return `<div class="vrow" data-id="${v.id}">
+    <input class="vn" data-f="name" value="${esc(v.name)}" placeholder="e.g. Prius">
+    <input class="vm" data-f="mpg" value="${v.mpg||""}" placeholder="MPG" inputmode="decimal">
+    <select class="vf" data-f="fuel">${FUEL_TYPES.map(f=>`<option ${v.fuel===f?"selected":""}>${f}</option>`).join("")}</select>
+    <button class="btn danger sm del">✕</button></div>`; }
 function renderManage(){
-  document.getElementById("kidList").innerHTML = state.kids.map(k=>personRow("kid",k)).join("")
-    || `<div class="hint">No children yet.</div>`;
-  document.getElementById("drvList").innerHTML = state.drivers.map(d=>personRow("drv",d)).join("")
-    || `<div class="hint">No drivers yet.</div>`;
+  document.getElementById("kidList").innerHTML=state.kids.map(kidRowHtml).join("")||emptyHint("No children yet.");
+  document.getElementById("drvList").innerHTML=state.drivers.map(drvCardHtml).join("")||emptyHint("No drivers yet.");
+  document.getElementById("placeList").innerHTML=state.places.map(placeRowHtml).join("")||emptyHint("No places yet — add each home and activity location with its address.");
+  document.getElementById("vehList").innerHTML=state.vehicles.map(vehRowHtml).join("")||emptyHint("No vehicles yet.");
   wireManage();
 }
-function personRow(kind,p){
-  const pal = kind==="kid"?KID_COLORS:DRV_COLORS;
-  const sw = pal.map(c=>`<span class="sw ${c===p.color?"on":""}" data-c="${c}" style="background:${c}"></span>`).join("");
-  return `<div class="mrow" data-kind="${kind}" data-id="${p.id}">
-    <span class="swatches">${sw}</span>
-    <input class="name" value="${esc(p.name)}" placeholder="${kind==="kid"?"Child's name":"Driver's name"}">
-    <button class="btn danger sm del">✕</button>
-  </div>`;
-}
 function wireManage(){
-  [...document.querySelectorAll("#ovManage .mrow")].forEach(row=>{
-    const kind=row.dataset.kind, id=row.dataset.id;
-    const list = kind==="kid"?state.kids:state.drivers;
-    const p=list.find(x=>x.id===id);
+  document.querySelectorAll("#kidList .mrow").forEach(row=>{
+    const p=kidById(row.dataset.id);
     row.querySelector(".name").oninput=e=>{ p.name=e.target.value; scheduleSoft(); };
-    row.querySelector(".name").onblur=()=>{ render(); };
-    [...row.querySelectorAll(".sw")].forEach(s=> s.onclick=()=>{
-      p.color=s.dataset.c;
-      [...row.querySelectorAll(".sw")].forEach(x=>x.classList.toggle("on",x.dataset.c===p.color));
-      scheduleSoft();
-    });
-    row.querySelector(".del").onclick=()=>removePerson(kind,id);
+    row.querySelector(".name").onblur=()=>render();
+    row.querySelectorAll(".sw").forEach(s=>s.onclick=()=>{ p.color=s.dataset.c;
+      row.querySelectorAll(".sw").forEach(x=>x.classList.toggle("on",x.dataset.c===p.color)); scheduleSoft(); render(); });
+    row.querySelector(".del").onclick=()=>removePerson("kid",row.dataset.id);
+  });
+  document.querySelectorAll("#drvList .drvcard").forEach(card=>{
+    const d=drvById(card.dataset.id);
+    card.querySelector(".name").oninput=e=>{ d.name=e.target.value; scheduleSoft(); };
+    card.querySelector(".name").onblur=()=>render();
+    card.querySelectorAll(".sw").forEach(s=>s.onclick=()=>{ d.color=s.dataset.c;
+      card.querySelectorAll(".sw").forEach(x=>x.classList.toggle("on",x.dataset.c===d.color)); scheduleSoft(); render(); });
+    card.querySelector('select[data-f="home"]').onchange=e=>{ d.homePlaceId=e.target.value; scheduleSoft(); render(); };
+    card.querySelector('select[data-f="veh"]').onchange=e=>{ d.usualVehicleId=e.target.value; scheduleSoft(); render(); };
+    card.querySelector(".del").onclick=()=>removePerson("drv",card.dataset.id);
+  });
+  document.querySelectorAll("#placeList .prow").forEach(row=>{
+    const p=placeById(row.dataset.id);
+    row.querySelector('[data-f="name"]').oninput=e=>{ p.name=e.target.value; scheduleSoft(); };
+    row.querySelector('[data-f="name"]').onblur=()=>render();
+    row.querySelector('[data-f="address"]').oninput=e=>{ p.address=e.target.value; scheduleSoft(); };
+    row.querySelector(".del").onclick=()=>removePlace(row.dataset.id);
+  });
+  document.querySelectorAll("#vehList .vrow").forEach(row=>{
+    const v=vehById(row.dataset.id);
+    row.querySelector('[data-f="name"]').oninput=e=>{ v.name=e.target.value; scheduleSoft(); };
+    row.querySelector('[data-f="name"]').onblur=()=>render();
+    row.querySelector('[data-f="mpg"]').oninput=e=>{ v.mpg=+e.target.value||0; scheduleSoft(); };
+    row.querySelector('[data-f="fuel"]').onchange=e=>{ v.fuel=e.target.value; scheduleSoft(); };
+    row.querySelector(".del").onclick=()=>removeVeh(row.dataset.id);
   });
 }
 let softTimer=null;
-function scheduleSoft(){ saveLocal(); clearTimeout(softTimer); softTimer=setTimeout(()=>{ schedulePush(); },600); }
-function addKid(){
-  const color=KID_COLORS[state.kids.length%KID_COLORS.length];
-  state.kids.push({id:rid("k"),name:"",color});
-  saveLocal(); renderManage();
-  const rows=document.querySelectorAll("#kidList .mrow"); const last=rows[rows.length-1];
-  if(last) last.querySelector(".name").focus();
-}
-function addDrv(){
-  const color=DRV_COLORS[state.drivers.length%DRV_COLORS.length];
-  state.drivers.push({id:rid("d"),name:"",color});
-  saveLocal(); renderManage();
-  const rows=document.querySelectorAll("#drvList .mrow"); const last=rows[rows.length-1];
-  if(last) last.querySelector(".name").focus();
-}
+function scheduleSoft(){ saveLocal(); clearTimeout(softTimer); softTimer=setTimeout(()=>schedulePush(),600); }
+function focusLast(listId){ const rows=document.querySelectorAll("#"+listId+" .name, #"+listId+" [data-f='name']");
+  const last=rows[rows.length-1]; if(last) last.focus(); }
+function addKid(){ state.kids.push({id:rid("k"),name:"",color:KID_COLORS[state.kids.length%KID_COLORS.length]});
+  saveLocal(); renderManage(); render(); focusLast("kidList"); }
+function addDrv(){ state.drivers.push({id:rid("d"),name:"",color:DRV_COLORS[state.drivers.length%DRV_COLORS.length],homePlaceId:"",usualVehicleId:""});
+  saveLocal(); renderManage(); render(); focusLast("drvList"); }
+function addPlace(){ state.places.push({id:rid("p"),name:"",address:"",isHome:false});
+  saveLocal(); renderManage(); render(); focusLast("placeList"); }
+function addVeh(){ state.vehicles.push({id:rid("v"),name:"",mpg:0,fuel:"Gas"});
+  saveLocal(); renderManage(); render(); focusLast("vehList"); }
 function removePerson(kind,id){
   if(kind==="kid"){
-    const acts=state.acts.filter(a=>a.kidId===id).length;
-    if(acts && !confirm(`Delete this child and their ${acts} activit${acts===1?"y":"ies"}?`)) return;
-    state.kids=state.kids.filter(k=>k.id!==id);
-    state.acts=state.acts.filter(a=>a.kidId!==id);
+    const n=state.acts.filter(a=>a.kidId===id).length;
+    if(n && !confirm(`Delete this child and their ${n} activit${n===1?"y":"ies"}?`)) return;
+    state.kids=state.kids.filter(k=>k.id!==id); state.acts=state.acts.filter(a=>a.kidId!==id);
   }else{
     state.drivers=state.drivers.filter(d=>d.id!==id);
     state.acts.forEach(a=>{ if(a.dropId===id)a.dropId=""; if(a.pickId===id)a.pickId=""; });
   }
   renderManage(); commit();
 }
+function removePlace(id){
+  state.places=state.places.filter(p=>p.id!==id);
+  state.acts.forEach(a=>{ if(a.placeId===id)a.placeId=""; if(a.dropFromId===id)a.dropFromId=""; if(a.pickToId===id)a.pickToId=""; });
+  state.drivers.forEach(d=>{ if(d.homePlaceId===id)d.homePlaceId=""; });
+  renderManage(); commit();
+}
+function removeVeh(id){
+  state.vehicles=state.vehicles.filter(v=>v.id!==id);
+  state.acts.forEach(a=>{ if(a.vehicleId===id)a.vehicleId=""; });
+  state.drivers.forEach(d=>{ if(d.usualVehicleId===id)d.usualVehicleId=""; });
+  renderManage(); commit();
+}
 
 /* ================= SHARE ================= */
-function openShare(){
-  document.getElementById("shareUrl").value = location.href;
-  showOverlay("ovShare");
-  setTimeout(()=>{ const i=document.getElementById("shareUrl"); i.focus(); i.select(); },50);
-}
+function openShare(){ document.getElementById("shareUrl").value=location.href; showOverlay("ovShare");
+  setTimeout(()=>{ const i=document.getElementById("shareUrl"); i.focus(); i.select(); },50); }
 async function copyLink(){
   const url=location.href;
   try{ await navigator.clipboard.writeText(url); toast("Link copied ✓"); }
@@ -903,6 +1118,9 @@ function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg
 function wire(){
   document.getElementById("segWeek").onclick=()=>{ ui.view="week"; render(); };
   document.getElementById("segAgenda").onclick=()=>{ ui.view="agenda"; render(); };
+  document.getElementById("btnPrevWk").onclick=()=>{ ui.weekStart=addDays(ui.weekStart,-7); render(); };
+  document.getElementById("btnNextWk").onclick=()=>{ ui.weekStart=addDays(ui.weekStart,7); render(); };
+  document.getElementById("btnToday").onclick=()=>{ ui.weekStart=mondayOf(new Date()); render(); };
   document.getElementById("filter").onchange=e=>{ ui.filter=e.target.value; render(); };
   document.getElementById("btnShare").onclick=openShare;
   document.getElementById("btnManage").onclick=openManage;
@@ -913,17 +1131,25 @@ function wire(){
   document.getElementById("fSave").onclick=saveAct;
   document.getElementById("fDelete").onclick=deleteAct;
   document.getElementById("fTrans").onchange=e=>toggleTrans(e.target.checked);
-  // manage
+  document.getElementById("fRepWeekly").onclick=()=>{ ui.editRepeat="weekly"; applyRepeatUI(); };
+  document.getElementById("fRepOnce").onclick=()=>{ ui.editRepeat="once"; applyRepeatUI(); };
+  document.getElementById("fAddPlaceBtn").onclick=showNewPlace;
+  document.getElementById("fNewPlaceSave").onclick=saveNewPlace;
+  document.getElementById("fNewPlaceCancel").onclick=hideNewPlace;
+  document.getElementById("fVeh").onchange=updateFuelHint;
+  document.getElementById("fDist").oninput=updateFuelHint;
+  // setup
   document.getElementById("addKid").onclick=addKid;
   document.getElementById("addDrv").onclick=addDrv;
+  document.getElementById("addPlace").onclick=addPlace;
+  document.getElementById("addVeh").onclick=addVeh;
   document.getElementById("mDone").onclick=()=>{ hideOverlay("ovManage"); commit(); };
   // share
   document.getElementById("copyLink").onclick=copyLink;
   document.getElementById("shareDone").onclick=()=>hideOverlay("ovShare");
   // overlay click-out
   [...document.querySelectorAll(".overlay")].forEach(o=> o.addEventListener("click",e=>{ if(e.target===o){
-    o.classList.remove("show"); if(o.id==="ovManage") commit();
-  }}));
+    o.classList.remove("show"); if(o.id==="ovManage") commit(); }}));
   document.addEventListener("keydown",e=>{ if(e.key==="Escape") document.querySelectorAll(".overlay.show").forEach(o=>{
     o.classList.remove("show"); if(o.id==="ovManage") commit(); }); });
   window.addEventListener("hashchange",()=>{ if(!location.hash.includes(SCHED_ID)) location.reload(); });
@@ -931,11 +1157,8 @@ function wire(){
 
 /* ================= boot ================= */
 function boot(){
-  loadLocal();
-  wire();
-  render();
-  setSync("warn","Connecting…");
-  startPolling();
+  loadLocal(); wire(); render();
+  setSync("warn","Connecting…"); startPolling();
   document.addEventListener("visibilitychange",()=>{ if(!document.hidden) cloudPull(); });
 }
 boot();
