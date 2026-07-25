@@ -98,6 +98,22 @@
     color:var(--ok);font-weight:600;display:flex;align-items:center;gap:8px;box-shadow:var(--shadow)}
   .cf-head{font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:2px 0}
 
+  /* Driver load panel */
+  #drivers{margin-bottom:14px}
+  .dpanel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  .dpanel>h3{margin:0;padding:9px 14px;background:var(--panel2);border-bottom:1px solid var(--line);font-size:13px;
+    display:flex;align-items:center;gap:8px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .dpanel>h3 .bal{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:600;font-size:12px}
+  .drow{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)}
+  .drow:last-child{border-bottom:0}
+  .drow .dn{font-weight:700;flex:0 0 33%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    display:flex;align-items:center;gap:7px}
+  .drow .dbarwrap{flex:1;height:8px;background:var(--panel2);border-radius:5px;overflow:hidden;min-width:40px}
+  .drow .dbar{height:100%;border-radius:5px}
+  .drow .dstat{flex:none;font-size:12.5px;color:var(--muted);text-align:right;min-width:112px}
+  .drow .dstat b{color:var(--txt)}
+  @media (max-width:560px){ .drow .dn{flex:0 0 30%} .drow .dstat{min-width:96px;font-size:12px} }
+
   /* WEEK GRID */
   .gridscroll{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}
   .grid{display:grid;grid-template-columns:52px repeat(7,minmax(120px,1fr));min-width:760px;position:relative}
@@ -277,6 +293,7 @@
   </div>
 
   <div id="conflicts"></div>
+  <div id="drivers"></div>
   <div id="view"></div>
 </div>
 
@@ -344,6 +361,27 @@
         <div class="fuelhint" id="fFuelHint" style="display:none"></div>
         <div class="hint">Drop-off = there by start time. Pick-up = collected at end. “Leaves from / ends at” default to the driver’s home.</div>
       </div>
+      <div class="field" id="occBlock" style="display:none">
+        <label>Just this date — <span id="occDateLbl"></span></label>
+        <div class="transbox">
+          <label class="checkline"><input type="checkbox" id="occSkip"> 🚫 Cancel this one date</label>
+          <div class="row2" id="occTimes">
+            <div class="field"><label>Starts</label><input type="time" id="occStart"></div>
+            <div class="field"><label>Ends</label><input type="time" id="occEnd"></div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button type="button" class="btn sm" id="occReset">↩︎ Back to usual</button>
+            <span class="hint" id="occStatus"></span>
+          </div>
+          <div class="hint">Changes here affect <b>only this date</b>. The rest of the series is untouched.</div>
+        </div>
+      </div>
+      <div class="field" id="exSummary" style="display:none">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="hint" id="exText"></span>
+          <button type="button" class="btn sm" id="exClear">Clear all</button>
+        </div>
+      </div>
       <div class="field"><label>Notes (optional)</label><textarea id="fNotes" placeholder="Bring cleats & water bottle"></textarea></div>
     </div>
     <div class="foot">
@@ -371,6 +409,15 @@
           <div class="field"><label>Diesel ($/gal)</label><input type="text" inputmode="decimal" id="dieselPriceInput" placeholder="3.60" autocomplete="off"></div>
         </div>
         <div class="hint">Applied by each vehicle's fuel type; electric vehicles show no gas cost. Editable estimate — set these to your local prices.</div>
+      </div>
+      <div class="msec">
+        <div class="subhead">Backups <span class="lt">— restore if something gets deleted</span></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <button class="btn sm" id="snapNow">💾 Back up now</button>
+          <span class="hint" id="snapStatus"></span>
+        </div>
+        <div class="mlist" id="snapList"></div>
+        <div class="hint" style="margin-top:6px">A backup saves automatically as you make changes (at most every 30 min); the newest 20 are kept. Restoring backs up your current schedule first, so you can undo it.</div>
       </div>
       <div class="msec">
         <div class="subhead">Auto-distances <span class="lt">— Google Maps (optional)</span></div>
@@ -495,6 +542,37 @@ function activeOnDate(a, date){
   if(a.startDate && iso < a.startDate) return false;
   if(a.endDate && iso > a.endDate) return false;
   return true;
+}
+/* Per-date exceptions: a.except[ISO] is either {skip:true} (cancelled that day)
+   or {start,end} (this date runs at a different time). */
+function normExcept(x){
+  const out={};
+  if(x && typeof x==="object") Object.keys(x).forEach(k=>{
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
+    const v=x[k]; if(!v || typeof v!=="object") return;
+    if(v.skip){ out[k]={skip:true}; return; }
+    const e={};
+    if(v.start!=null && isFinite(+v.start)) e.start=clamp(+v.start,0,1439);
+    if(v.end!=null   && isFinite(+v.end))   e.end=clamp(+v.end,0,1440);
+    if(e.start!=null || e.end!=null) out[k]=e;
+  });
+  return out;
+}
+/* The single source of truth for "does this activity happen on this date, and
+   when?" — null when it doesn't (wrong day, out of season, or skipped). */
+function occurrenceOn(a, date){
+  if(!activeOnDate(a,date)) return null;
+  const ex=(a.except||{})[isoDate(date)];
+  if(ex && ex.skip) return null;
+  const start=(ex && ex.start!=null)? ex.start : a.start;
+  let end=(ex && ex.end!=null)? ex.end : a.end;
+  if(end<=start) end=start+60;
+  return { start, end, moved: !!(ex && (ex.start!=null || ex.end!=null)) };
+}
+function exceptCounts(a){
+  const ex=a.except||{}; let skips=0, moves=0;
+  Object.keys(ex).forEach(k=>{ if(ex[k].skip) skips++; else moves++; });
+  return {skips,moves,total:skips+moves};
 }
 function passFilter(a){
   if(ui.filter==="all") return true;
@@ -648,13 +726,33 @@ function legCostLine(act, side){
 function weeklyGasCost(){
   const drvFilter = ui.filter.startsWith("drv:")? ui.filter.split(":")[1] : null;
   const dates=weekDates(ui.weekStart); let total=0, any=false;
-  dates.forEach(dt=> state.acts.forEach(a=>{ if(!activeOnDate(a,dt)||!passFilter(a)||!a.trans) return;
+  dates.forEach(dt=> state.acts.forEach(a=>{ if(!passFilter(a)||!a.trans||!occurrenceOn(a,dt)) return;
     if(drvFilter){ // only the legs this driver actually drives
       ["drop","pick"].forEach(side=>{ const drvId=side==="drop"?a.dropId:a.pickId; if(drvId!==drvFilter) return;
         const l=legInfo(a,side); if(l&&l.rt&&l.rt.cost!=null){ total+=l.rt.cost; any=true; } });
     }else{ const e=activityEconomy(a); if(e&&e.cost!=null){ total+=e.cost; any=true; } }
   }));
   return any? total : null;
+}
+/* Per-driver load for the viewed week: legs driven, round-trip miles and gas cost.
+   Counts each occurrence, so a Tue+Thu activity counts twice and a skipped date
+   counts not at all. */
+function driverWeekTotals(){
+  const map=new Map();
+  weekDates(ui.weekStart).forEach(dt=> state.acts.forEach(a=>{
+    if(!a.trans || !occurrenceOn(a,dt)) return;
+    ["drop","pick"].forEach(side=>{
+      const drvId = side==="drop"? a.dropId : a.pickId;
+      if(!drvId) return;
+      const l=legInfo(a,side);
+      const m=map.get(drvId) || {id:drvId, rides:0, miles:0, cost:0, hasCost:false, hasMiles:false};
+      m.rides++;
+      if(l && l.miles!=null){ m.miles += l.miles*2; m.hasMiles=true; }
+      if(l && l.rt && l.rt.cost!=null){ m.cost += l.rt.cost; m.hasCost=true; }
+      map.set(drvId,m);
+    });
+  }));
+  return [...map.values()].sort((x,y)=> y.rides-x.rides || y.miles-x.miles);
 }
 
 let gmapsPromise=null;
@@ -772,6 +870,7 @@ async function cloudPush(){
       body:JSON.stringify(body)});
     if(!r.ok){ showProblem(await classifyFailure(r)); return; }
     everConnected=true; syncProblem=""; setSync("ok","Synced","Everyone with the link sees these changes.");
+    maybeSnapshot();
   }catch(e){ showProblem("network"); }
 }
 function schedulePush(){ dirty=true; setSync("warn","…"); clearTimeout(pushTimer);
@@ -789,6 +888,9 @@ async function cloudPull(){
       const remote=rows[0].data||{};
       const rt=Date.parse(rows[0].updated_at)|| remote.updatedAt || 0;
       if(rt > (state.updatedAt||0) && !dirty){
+        // Last-write-wins can pull in a wipe from another device. If the incoming
+        // copy is empty and ours isn't, back ours up before letting it go.
+        if(hasContent(state) && !hasContent(remote)) await takeSnapshot();
         state = normalize(remote); state.updatedAt=rt; saveLocal(); render();
       }
     }else if(hasContent()){
@@ -807,6 +909,86 @@ function explainSync(){
     alert("Can't reach the sync server right now.\n\nYour changes are saved on this device and will upload automatically when the connection returns.");
   }else{
     alert("Sync is working ✓\n\nChanges save to the cloud and appear on every device that opens this same share link (the link ending in #s="+SCHED_ID+").\n\nIf a device isn't seeing updates, make sure it opened that exact link — not just the plain site address.");
+  }
+}
+
+/* ================= BACKUP SNAPSHOTS ================= */
+/* Anyone with the link can edit everything, so keep restorable copies. Silently
+   no-ops until supabase-snapshots.sql has been run. */
+const SNAP_TABLE="schedule_snapshots";
+const SNAP_KEEP=20, SNAP_EVERY_MS=30*60*1000;
+let snapTableMissing=false;
+function snapStamp(){ return "familySchedule.lastSnap."+SCHED_ID; }
+function hasContent(s){ return !!(s && ((s.acts&&s.acts.length) || (s.kids&&s.kids.length))); }
+async function takeSnapshot(){
+  if(snapTableMissing || !hasContent(state)) return false;
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/"+SNAP_TABLE,{ method:"POST",
+      headers:sbHeaders({Prefer:"return=minimal"}),
+      body:JSON.stringify([{ schedule_id:SCHED_ID, data:state }]) });
+    if(!r.ok){ if([401,403,404].includes(r.status)) snapTableMissing=true; throw new Error(r.status); }
+    try{ localStorage.setItem(snapStamp(), String(Date.now())); }catch(e){}
+    pruneSnapshots();
+    return true;
+  }catch(e){ return false; }
+}
+async function maybeSnapshot(){
+  if(snapTableMissing) return;
+  let last=0; try{ last=+localStorage.getItem(snapStamp())||0; }catch(e){}
+  if(Date.now()-last < SNAP_EVERY_MS) return;
+  takeSnapshot();
+}
+async function listSnapshots(){
+  const r=await fetch(SB_URL+"/rest/v1/"+SNAP_TABLE+"?schedule_id=eq."+encodeURIComponent(SCHED_ID)+
+    "&select=id,created_at&order=created_at.desc&limit=50",{headers:sbHeaders()});
+  if(!r.ok){ if([401,403,404].includes(r.status)) snapTableMissing=true; throw new Error(r.status); }
+  return r.json();
+}
+async function pruneSnapshots(){
+  try{
+    const rows=await listSnapshots();
+    const extra=rows.slice(SNAP_KEEP);
+    for(const row of extra){
+      await fetch(SB_URL+"/rest/v1/"+SNAP_TABLE+"?id=eq."+row.id,{method:"DELETE",headers:sbHeaders()});
+    }
+  }catch(e){}
+}
+async function restoreSnapshot(id){
+  const r=await fetch(SB_URL+"/rest/v1/"+SNAP_TABLE+"?id=eq."+encodeURIComponent(id)+"&select=data",{headers:sbHeaders()});
+  if(!r.ok) throw new Error(r.status);
+  const rows=await r.json();
+  if(!rows.length) throw new Error("gone");
+  await takeSnapshot();                       // snapshot the current state so a restore is undoable
+  state=normalize(rows[0].data);
+  saveLocal(); render(); await cloudPush();
+}
+function agoLabel(iso){
+  const t=Date.parse(iso); if(!isFinite(t)) return iso;
+  const mins=Math.round((Date.now()-t)/60000);
+  if(mins<1) return "just now";
+  if(mins<60) return mins+" min ago";
+  const hrs=Math.round(mins/60); if(hrs<24) return hrs+" hr ago";
+  const d=new Date(t);
+  return d.toLocaleDateString(undefined,{month:"short",day:"numeric"})+" "+d.toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"});
+}
+async function renderSnapshots(){
+  const box=document.getElementById("snapList"), st=document.getElementById("snapStatus");
+  if(!box) return;
+  box.innerHTML=`<div class="hint">Loading…</div>`;
+  try{
+    const rows=await listSnapshots();
+    if(!rows.length){ box.innerHTML=`<div class="hint">No backups yet — one is saved automatically as you make changes.</div>`; return; }
+    box.innerHTML=rows.slice(0,SNAP_KEEP).map(r=>`<div class="mrow">
+      <span style="flex:1">${esc(agoLabel(r.created_at))}</span>
+      <button class="btn sm" data-snap="${r.id}">Restore</button></div>`).join("");
+    [...box.querySelectorAll("[data-snap]")].forEach(b=> b.onclick=async()=>{
+      if(!confirm("Restore this backup? Your current schedule is backed up first, so you can undo this.")) return;
+      b.disabled=true; if(st) st.textContent="Restoring…";
+      try{ await restoreSnapshot(b.dataset.snap); if(st) st.textContent="✓ Restored."; toast("Backup restored"); renderSnapshots(); }
+      catch(e){ if(st) st.textContent="Restore failed ("+(e.message||"error")+")."; b.disabled=false; }
+    });
+  }catch(e){
+    box.innerHTML=`<div class="hint">Backups aren't set up yet — run <b>supabase-snapshots.sql</b> once in your Supabase SQL Editor to turn them on.</div>`;
   }
 }
 
@@ -835,7 +1017,8 @@ function normalize(s){
       date:a.date||"", startDate:a.startDate||"", endDate:a.endDate||"",
       start:a.start||960, end:a.end||1020, trans:a.trans!==false,
       dropId:a.dropId||"", pickId:a.pickId||"", dropFromId:a.dropFromId||"", pickToId:a.pickToId||"",
-      vehicleId:a.vehicleId||"", distMiles:(a.distMiles===0||a.distMiles)?+a.distMiles:null, notes:a.notes||"" };
+      vehicleId:a.vehicleId||"", distMiles:(a.distMiles===0||a.distMiles)?+a.distMiles:null,
+      except:normExcept(a.except), notes:a.notes||"" };
   }):[];
   return { title:s.title||d.title, buffer:Number.isFinite(s.buffer)?s.buffer:d.buffer,
     dayStart:s.dayStart||d.dayStart, dayEnd:s.dayEnd||d.dayEnd,
@@ -854,24 +1037,26 @@ function computeConflicts(weekStart){
   const seenUnassigned=new Set();
   weekDates(weekStart).forEach(date=>{
     const dayLabel=fmtDateFull(date), iso=isoDate(date);
-    const acts=state.acts.filter(a=>activeOnDate(a,date));
+    // occurrences actually happening this date (skips removed, moved times applied)
+    const occs=[];
+    state.acts.forEach(a=>{ const o=occurrenceOn(a,date); if(o) occs.push({a,start:o.start,end:o.end}); });
 
     // 1. Child double-booked
-    for(let i=0;i<acts.length;i++) for(let j=i+1;j<acts.length;j++){
-      const a=acts[i],b=acts[j];
+    for(let i=0;i<occs.length;i++) for(let j=i+1;j<occs.length;j++){
+      const x=occs[i],y=occs[j], a=x.a, b=y.a;
       const shared=(a.kidIds||[]).filter(id=>(b.kidIds||[]).includes(id));
-      if(shared.length && overlaps(a.start,a.end,b.start,b.end)){
+      if(shared.length && overlaps(x.start,x.end,y.start,y.end)){
         out.push({sev:"danger",ic:"⛔",cat:"Child double-booked",
           msg:shared.map(kidName).join(" & ")+" has two activities at once "+dayLabel,
-          sub:a.name+" ("+label12(a.start)+") overlaps "+b.name+" ("+label12(b.start)+")",
+          sub:a.name+" ("+label12(x.start)+") overlaps "+b.name+" ("+label12(y.start)+")",
           ids:[a.id,b.id]});
       }
     }
     // transport events
     const T=[];
-    acts.forEach(a=>{ if(!a.trans) return;
-      T.push({actId:a.id,kids:actKidNames(a),type:"drop",driverId:a.dropId,t:a.start,loc:a.placeId,name:a.name});
-      T.push({actId:a.id,kids:actKidNames(a),type:"pick",driverId:a.pickId,t:a.end,loc:a.placeId,name:a.name});
+    occs.forEach(o=>{ const a=o.a; if(!a.trans) return;
+      T.push({actId:a.id,kids:actKidNames(a),type:"drop",driverId:a.dropId,t:o.start,loc:a.placeId,name:a.name});
+      T.push({actId:a.id,kids:actKidNames(a),type:"pick",driverId:a.pickId,t:o.end,loc:a.placeId,name:a.name});
     });
     const win=e=>[e.t-buf,e.t+buf];
 
@@ -910,7 +1095,7 @@ function computeConflicts(weekStart){
       }
     }
     // 4. Unassigned rides (once per activity across the week)
-    acts.forEach(a=>{ if(!a.trans || seenUnassigned.has(a.id)) return;
+    occs.forEach(o=>{ const a=o.a; if(!a.trans || seenUnassigned.has(a.id)) return;
       const miss=[]; if(!a.dropId)miss.push("drop-off"); if(!a.pickId)miss.push("pick-up");
       if(miss.length){ seenUnassigned.add(a.id);
         out.push({sev:"warn",ic:"❓",cat:"Ride not assigned",
@@ -927,7 +1112,7 @@ function verbText(e){ return (e.type==="drop"?"drop off ":"pick up ")+e.kids; }
 
 /* ================= RENDER ================= */
 function render(){
-  renderFilter(); renderWeekNav(); renderFilterInfo(); renderConflicts();
+  renderFilter(); renderWeekNav(); renderFilterInfo(); renderConflicts(); renderDrivers();
   if(ui.view==="week") renderWeek(); else renderAgenda();
   document.getElementById("segWeek").classList.toggle("on",ui.view==="week");
   document.getElementById("segAgenda").classList.toggle("on",ui.view==="agenda");
@@ -952,7 +1137,7 @@ function renderFilter(){
   if(sel.value!==cur){ ui.filter="all"; sel.value="all"; }
 }
 function actsThisWeek(){ const dates=weekDates(ui.weekStart); const set=new Set();
-  dates.forEach(dt=>state.acts.forEach(a=>{ if(activeOnDate(a,dt)&&passFilter(a)) set.add(a.id); })); return set.size; }
+  dates.forEach(dt=>state.acts.forEach(a=>{ if(passFilter(a)&&occurrenceOn(a,dt)) set.add(a.id); })); return set.size; }
 function renderFilterInfo(){
   const el=document.getElementById("filterinfo"); const n=actsThisWeek();
   const gc=weeklyGasCost(); const wk=`<b>${n}</b> this week${gc!=null?` · ~${money(gc)} gas`:""}`;
@@ -973,6 +1158,35 @@ function renderConflicts(){
       <div class="msg"><b>${c.cat}:</b> ${esc(c.msg)}<small>${esc(c.sub)}</small></div>
     </div>`).join("");
   [...box.querySelectorAll(".cf")].forEach((el,i)=> el.onclick=()=>jumpTo(cs[i]));
+}
+function renderDrivers(){
+  const box=document.getElementById("drivers");
+  const rows=driverWeekTotals();
+  if(rows.length<1){ box.innerHTML=""; return; }
+  const maxRides=Math.max(...rows.map(r=>r.rides),1);
+  // Flag an imbalance only when it's meaningful (2+ rides apart) and more than one driver shares the week.
+  let bal="";
+  if(rows.length>1){
+    const hi=rows[0], lo=rows[rows.length-1];
+    bal = (hi.rides-lo.rides)>=2
+      ? `⚖️ ${esc(drvName(hi.id))} has ${hi.rides-lo.rides} more than ${esc(drvName(lo.id))}`
+      : "⚖️ Fairly balanced";
+  }
+  box.innerHTML=`<div class="dpanel"><h3>🚗 Driving this week<span class="bal">${bal}</span></h3>`+
+    rows.map(r=>{
+      const d=drvById(r.id); const color=d?d.color:"#888";
+      const bits=[`<b>${r.rides}</b> ride${r.rides===1?"":"s"}`];
+      if(r.hasMiles) bits.push(`<b>${Math.round(r.miles)}</b> mi`);
+      if(r.hasCost)  bits.push(`<b>~${money(r.cost)}</b>`);
+      return `<div class="drow" data-drv="${r.id}">
+        <span class="dn"><span class="kiddot" style="background:${color}"></span>${esc(drvName(r.id)||"(unnamed)")}</span>
+        <span class="dbarwrap"><span class="dbar" style="width:${Math.round(r.rides/maxRides*100)}%;background:${color}"></span></span>
+        <span class="dstat">${bits.join(" · ")}</span>
+      </div>`;
+    }).join("")+`</div>`;
+  [...box.querySelectorAll(".drow")].forEach(el=> el.onclick=()=>{
+    ui.filter="drv:"+el.dataset.drv; ui.view="agenda"; render();
+  });
 }
 function jumpTo(c){
   if(ui.view!=="week"){ ui.view="week"; render(); }
@@ -1008,24 +1222,29 @@ function renderWeek(){
     let col=`<div class="daycol" style="height:${H}px">`;
     for(let m=Math.ceil(ds/60)*60;m<=de;m+=60){ col+=`<div class="hourline" style="top:${(m-ds)*PXMIN}px"></div>`; }
     if(isT && nowMin>=ds && nowMin<=de) col+=`<div class="nowline" style="top:${(nowMin-ds)*PXMIN}px"></div>`;
-    const dayActs=state.acts.filter(a=>activeOnDate(a,date)&&passFilter(a)).sort((a,b)=>a.start-b.start||a.end-b.end);
+    const iso=isoDate(date);
+    const dayActs=[];
+    state.acts.forEach(a=>{ if(!passFilter(a)) return; const o=occurrenceOn(a,date);
+      if(o) dayActs.push({id:a.id,a,start:o.start,end:o.end,moved:o.moved}); });
+    dayActs.sort((x,y)=>x.start-y.start||x.end-y.end);
     const packed=packColumns(dayActs);
-    dayActs.forEach(a=>{
-      const top=(clamp(a.start,ds,de)-ds)*PXMIN;
-      const h=Math.max((clamp(a.end,ds,de)-clamp(a.start,ds,de))*PXMIN, 26);
+    dayActs.forEach(it=>{
+      const a=it.a;
+      const top=(clamp(it.start,ds,de)-ds)*PXMIN;
+      const h=Math.max((clamp(it.end,ds,de)-clamp(it.start,ds,de))*PXMIN, 26);
       const info=packed[a.id]; const wpct=100/info.n; const left=info.i*wpct;
-      col+=`<div class="ev" data-id="${a.id}" style="top:${top}px;height:${h}px;background:${actGradient(a)};
+      col+=`<div class="ev" data-id="${a.id}" data-d="${iso}" style="top:${top}px;height:${h}px;background:${actGradient(a)};
         left:calc(${left}% + 2px);width:calc(${wpct}% - 4px)">
         ${warnBadge(a)}
-        <div class="en">${esc(a.name)}</div>
-        <div class="esub">${label12(a.start)}–${label12(a.end)}${a.placeId?" · "+esc(placeName(a.placeId)):""}</div>
+        <div class="en">${it.moved?"⏰ ":""}${esc(a.name)}</div>
+        <div class="esub">${label12(it.start)}–${label12(it.end)}${a.placeId?" · "+esc(placeName(a.placeId)):""}</div>
         ${a.trans?transChips(a):""}
       </div>`;
     });
     col+=`</div>`; cols+=col;
   });
   v.innerHTML=`<div class="gridscroll"><div class="grid">${head}${timecol}${cols}</div></div>`;
-  [...v.querySelectorAll(".ev")].forEach(el=> el.onclick=()=>openAct(el.dataset.id));
+  [...v.querySelectorAll(".ev")].forEach(el=> el.onclick=()=>openAct(el.dataset.id, el.dataset.d));
   if(ui.flashIds.length) flashNow();
 }
 function warnBadge(a){ return (a.trans && (!a.dropId||!a.pickId))?`<span class="warnbadge">❓</span>`:""; }
@@ -1063,29 +1282,30 @@ function renderAgenda(){
   const dates=weekDates(ui.weekStart); const todayIso=isoDate(new Date());
   let html=`<div class="agenda">`; let any=false;
   dates.forEach(date=>{
-    const isT=isoDate(date)===todayIso;
-    let items;
+    const isT=isoDate(date)===todayIso, iso=isoDate(date);
+    let items=[];
     if(isDriver){
-      items=[];
-      state.acts.filter(a=>activeOnDate(a,date)&&a.trans).forEach(a=>{
-        if(a.dropId===driverId) items.push({t:a.start,type:"drop",a});
-        if(a.pickId===driverId) items.push({t:a.end,type:"pick",a});
+      state.acts.forEach(a=>{ if(!a.trans) return; const o=occurrenceOn(a,date); if(!o) return;
+        if(a.dropId===driverId) items.push({t:o.start,type:"drop",a,occ:o,iso});
+        if(a.pickId===driverId) items.push({t:o.end,type:"pick",a,occ:o,iso});
       });
       items.sort((x,y)=>x.t-y.t);
     }else{
-      items=state.acts.filter(a=>activeOnDate(a,date)&&passFilter(a)).sort((a,b)=>a.start-b.start).map(a=>({t:a.start,a}));
+      state.acts.forEach(a=>{ if(!passFilter(a)) return; const o=occurrenceOn(a,date);
+        if(o) items.push({t:o.start,a,occ:o,iso}); });
+      items.sort((x,y)=>x.t-y.t);
     }
     if(!items.length) return;
     any=true;
     const noun=isDriver?"ride":"item";
     html+=`<div class="aday ${isT?"today":""}"><h3>${esc(fmtDateFull(date))}${isT?' <span class="cnt">· Today</span>':""}<span class="spacer" style="flex:1"></span><span class="cnt">${items.length} ${noun}${items.length>1?"s":""}</span></h3>`;
-    items.forEach(it=>{ html+= isDriver? driverTaskCard(it) : activityCard(it.a); });
+    items.forEach(it=>{ html+= isDriver? driverTaskCard(it) : activityCard(it.a,it.occ,it.iso); });
     html+=`</div>`;
   });
   html+=`</div>`;
   if(!any) html=`<div class="empty"><h2>Nothing scheduled this week${ui.filter!=="all"?" for this person":""}</h2><p>Use ‹ › to change weeks, or add an activity.</p></div>`;
   v.innerHTML=html;
-  [...v.querySelectorAll("[data-id]")].forEach(el=> el.onclick=(e)=>{ if(e.target.closest("a")) return; openAct(el.dataset.id); });
+  [...v.querySelectorAll("[data-id]")].forEach(el=> el.onclick=(e)=>{ if(e.target.closest("a")) return; openAct(el.dataset.id, el.dataset.d); });
 }
 function recurLabel(a){
   if(a.repeat==="once") return a.date?("One-time · "+fmtDateFull(parseISODate(a.date))):"One-time";
@@ -1097,7 +1317,8 @@ function recurLabel(a){
   }
   return wd+" · weekly";
 }
-function activityCard(a){
+function activityCard(a, occ, iso){
+  occ=occ||{start:a.start,end:a.end,moved:false};
   const pname=placeName(a.placeId), addr=placeAddr(a.placeId);
   let trans;
   if(a.trans){
@@ -1111,11 +1332,11 @@ function activityCard(a){
   const em=effectiveMiles(a); const distLine=em>0?`<div class="vehline">📏 ${em} mi one-way${a.distMiles==null?" (auto)":""}</div>`:"";
   const cl=activityCostLine(a); const v0=effVehicle(a,null);
   const vehFallback=(!cl&&v0)?`<div class="vehline">🚗 ${esc(v0.name)}${v0.mpg?` · ${v0.mpg} mpg`:""}</div>`:"";
-  return `<div class="acard" data-id="${a.id}">
-    <div class="atime">${label12(a.start)}<small>${label12(a.end)}</small></div>
+  return `<div class="acard" data-id="${a.id}" data-d="${iso||""}">
+    <div class="atime">${label12(occ.start)}<small>${label12(occ.end)}</small></div>
     <div class="abody">
       <div><span class="akid">${kidDotsHtml(a)} ${esc(actKidNames(a))}</span><span class="aname">${esc(a.name)}</span></div>
-      <div class="aloc" style="text-transform:none">${esc(recurLabel(a))}</div>
+      <div class="aloc" style="text-transform:none">${esc(recurLabel(a))}${occ.moved?' · <b style="color:var(--warn)">⏰ moved this date</b>':""}</div>
       ${pname?`<div class="aloc">📍 ${esc(pname)}${addr?" — "+esc(addr):""}</div>`:""}
       ${a.notes?`<div class="aloc">📝 ${esc(a.notes)}</div>`:""}
       ${trans}${distLine}${cl||vehFallback}
@@ -1124,20 +1345,21 @@ function activityCard(a){
 }
 function driverTaskCard(it){
   const a=it.a; const drop=it.type==="drop"; const driverId=drop?a.dropId:a.pickId;
+  const occ=it.occ||{start:a.start,end:a.end,moved:false};
   const homeId=driverHomeId(driverId);
   const origId=drop?(a.dropFromId||homeId):a.placeId;
   const destId=drop?a.placeId:(a.pickToId||homeId);
   const origAddr=placeAddr(origId), destAddr=placeAddr(destId);
   const verb=drop?`<span class="verb drop">Drop off</span>`:`<span class="verb pick">Pick up</span>`;
   const line=drop?`Get <b>${esc(actKidNames(a))}</b> to <b>${esc(a.name)}</b>`:`Collect <b>${esc(actKidNames(a))}</b> from <b>${esc(a.name)}</b>`;
-  const when=drop?`Arrive by ${label12(a.start)}`:`Ready at ${label12(a.end)}`;
+  const when=(drop?`Arrive by ${label12(occ.start)}`:`Ready at ${label12(occ.end)}`)+(occ.moved?" ⏰ (moved)":"");
   const route=(origId||destId)?`<div class="tmeta">${esc(placeName(origId)||"—")} → <b>${esc(placeName(destId)||"—")}</b></div>`:"";
   const em=effectiveMiles(a); const distLine=em>0?`<div class="vehline">📏 ${em} mi one-way${a.distMiles==null?" (auto)":""}</div>`:"";
   const cl=legCostLine(a, drop?"drop":"pick"); const vObj=effVehicle(a,driverId);
   const vehFallback=(!cl&&vObj)?`<div class="vehline">🚗 ${esc(vObj.name)}${vObj.mpg?` · ${vObj.mpg} mpg`:""}</div>`:"";
   const url=dirUrl(origAddr,destAddr);
   const dir=url?`<a class="dirbtn" href="${url}" target="_blank" rel="noopener">🧭 Directions</a>`:"";
-  return `<div class="acard taskcard" data-id="${a.id}">
+  return `<div class="acard taskcard" data-id="${a.id}" data-d="${it.iso||""}">
     <div class="atime">${label12(it.t)}</div>
     <div class="abody">
       <div class="big">${verb}${kidDotsHtml(a)} ${line}</div>
@@ -1197,9 +1419,9 @@ function applyRepeatUI(){
   document.getElementById("weeklyBlock").style.display=weekly?"":"none";
   document.getElementById("onceBlock").style.display=weekly?"none":"";
 }
-function openAct(id){
+function openAct(id, iso){
   if(!state.kids.length){ toast("Add a child first"); openManage(); return; }
-  ui.editingId=id;
+  ui.editingId=id; ui.editIso=(id&&iso)?iso:"";
   const a=id?state.acts.find(x=>x.id===id):null;
   document.getElementById("actTitle").textContent=a?"Edit activity":"Add activity";
   ui.editKidIds = a? (a.kidIds||[]).slice() : (state.kids.length?[state.kids[0].id]:[]);
@@ -1225,8 +1447,38 @@ function openAct(id){
   updateFuelHint(); refreshAutoDistHint();
   document.getElementById("fNotes").value=a?a.notes:"";
   document.getElementById("fDelete").style.display=a?"":"none";
+  ui.editExcept = a? JSON.parse(JSON.stringify(a.except||{})) : {};
+  renderOccBlock(a);
   showOverlay("ovAct");
   setTimeout(()=>document.getElementById("fName").focus(),50);
+}
+/* "Just this date" panel — only shown when the editor was opened by tapping a
+   specific occurrence, since that's the only time we know which date to change. */
+function renderOccBlock(a){
+  const blk=document.getElementById("occBlock"), sum=document.getElementById("exSummary");
+  if(!a || !ui.editIso){ blk.style.display="none"; }
+  else{
+    blk.style.display="";
+    const dt=parseISODate(ui.editIso);
+    document.getElementById("occDateLbl").textContent=fmtDateFull(dt);
+    const ex=ui.editExcept[ui.editIso];
+    const skip=!!(ex&&ex.skip);
+    document.getElementById("occSkip").checked=skip;
+    const s=(ex&&ex.start!=null)?ex.start:a.start, e=(ex&&ex.end!=null)?ex.end:a.end;
+    document.getElementById("occStart").value=toHHMM(s);
+    document.getElementById("occEnd").value=toHHMM(e);
+    document.getElementById("occTimes").style.display=skip?"none":"";
+    document.getElementById("occStatus").textContent =
+      skip? "Cancelled on this date." : (ex? "Moved from the usual "+label12(a.start)+"." : "");
+  }
+  const c=a?exceptCounts(a):{total:0,skips:0,moves:0};
+  if(!a || !c.total){ sum.style.display="none"; }
+  else{
+    sum.style.display="";
+    const bits=[]; if(c.skips) bits.push(c.skips+" date"+(c.skips>1?"s":"")+" cancelled");
+    if(c.moves) bits.push(c.moves+" time change"+(c.moves>1?"s":""));
+    document.getElementById("exText").textContent=bits.join(" · ");
+  }
 }
 function renderKidChips(){
   const wrap=document.getElementById("fKids");
@@ -1333,12 +1585,25 @@ function saveAct(){
   const distRaw=document.getElementById("fDist").value.trim();
   const distMiles=distRaw===""?null:(isFinite(+distRaw)&&+distRaw>=0?+distRaw:null);
   if(!ui.editKidIds.length){ toast("Pick at least one child"); return; }
+  // fold the "just this date" panel into the exception map
+  const except=Object.assign({},ui.editExcept);
+  if(ui.editingId && ui.editIso){
+    if(document.getElementById("occSkip").checked) except[ui.editIso]={skip:true};
+    else{
+      const os=toMin(document.getElementById("occStart").value);
+      let oe=toMin(document.getElementById("occEnd").value);
+      if(oe<=os) oe=os+60;
+      if(os!==start || oe!==end) except[ui.editIso]={start:os,end:oe};
+      else delete except[ui.editIso];
+    }
+  }
   const rec={ kidIds:ui.editKidIds.slice(), name, placeId:document.getElementById("fPlace").value,
     repeat, days, day:days[0], date, startDate, endDate, start, end,
     trans:document.getElementById("fTrans").checked,
     dropId:document.getElementById("fDrop").value, pickId:document.getElementById("fPick").value,
     dropFromId:document.getElementById("fDropFrom").value, pickToId:document.getElementById("fPickTo").value,
-    vehicleId:document.getElementById("fVeh").value, distMiles, notes:document.getElementById("fNotes").value.trim() };
+    vehicleId:document.getElementById("fVeh").value, distMiles, except:normExcept(except),
+    notes:document.getElementById("fNotes").value.trim() };
   if(start<state.dayStart) state.dayStart=Math.floor(start/60)*60;
   if(end>state.dayEnd) state.dayEnd=Math.ceil(end/60)*60;
   let saved;
@@ -1358,6 +1623,8 @@ function openManage(){ renderManage(); document.getElementById("mapsKeyInput").v
   document.getElementById("mapsStatus").textContent=mapsKey()?"Key saved on this device ✓":"";
   document.getElementById("gasPriceInput").value=state.gasPrice!=null?state.gasPrice:"";
   document.getElementById("dieselPriceInput").value=state.dieselPrice!=null?state.dieselPrice:"";
+  document.getElementById("snapStatus").textContent="";
+  renderSnapshots();
   showOverlay("ovManage"); }
 function emptyHint(t){ return `<div class="hint">${esc(t)}</div>`; }
 function swatchesHtml(pal,cur){ return pal.map(c=>`<span class="sw ${c===cur?"on":""}" data-c="${c}" style="background:${c}"></span>`).join(""); }
@@ -1522,12 +1789,33 @@ function wire(){
   document.getElementById("fVeh").onchange=updateFuelHint;
   document.getElementById("fDist").oninput=updateFuelHint;
   document.getElementById("fAutoBtn").onclick=autoFillDistance;
+  document.getElementById("occSkip").onchange=e=>{
+    document.getElementById("occTimes").style.display=e.target.checked?"none":"";
+    document.getElementById("occStatus").textContent=e.target.checked?"Cancelled on this date.":"";
+  };
+  document.getElementById("occReset").onclick=()=>{
+    delete ui.editExcept[ui.editIso];
+    renderOccBlock(state.acts.find(x=>x.id===ui.editingId));
+    toast("This date follows the usual schedule");
+  };
+  document.getElementById("exClear").onclick=()=>{
+    ui.editExcept={};
+    const a=state.acts.find(x=>x.id===ui.editingId);
+    if(a){ const copy=Object.assign({},a,{except:{}}); renderOccBlock(copy); }
+    toast("All date changes cleared");
+  };
   ["fDrop","fPick","fDropFrom","fPickTo","fPlace"].forEach(id=>{
     document.getElementById(id).addEventListener("change",()=>{ updateFuelHint(); refreshAutoDistHint(); }); });
   // setup
   document.getElementById("mapsKeyInput").oninput=e=>{ const k=e.target.value.trim(); setMapsKey(k);
     const st=document.getElementById("mapsStatus"); if(st) st.textContent=k?"Key saved on this device ✓":""; };
   document.getElementById("mapsCompute").onclick=computeAllDistances;
+  document.getElementById("snapNow").onclick=async()=>{
+    const st=document.getElementById("snapStatus"); st.textContent="Saving…";
+    const ok=await takeSnapshot();
+    st.textContent = ok? "✓ Backed up." : (snapTableMissing? "Run supabase-snapshots.sql once to enable backups." : "Couldn't back up — check your connection.");
+    if(ok){ toast("Backup saved"); renderSnapshots(); }
+  };
   document.getElementById("gasPriceInput").oninput=e=>{ state.gasPrice=+e.target.value||0; scheduleSoft(); render(); };
   document.getElementById("dieselPriceInput").oninput=e=>{ state.dieselPrice=+e.target.value||0; scheduleSoft(); render(); };
   document.getElementById("addKid").onclick=addKid;
