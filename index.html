@@ -167,6 +167,12 @@
   .dirbtn{font-size:11.5px;border:1px solid var(--line);border-radius:20px;padding:2px 9px;background:var(--panel2);
     color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;font-weight:700}
   .dirbtn:hover{background:var(--panel)}
+  .leaveby{margin-top:6px;padding:5px 9px;border-radius:8px;background:rgba(250,70,22,.10);
+    border:1px solid rgba(250,70,22,.35);color:var(--txt);font-size:13px;display:inline-flex;
+    align-items:baseline;gap:7px;flex-wrap:wrap}
+  .leaveby b{font-size:14.5px}
+  .leaveby .lbmeta{color:var(--muted);font-size:11.5px}
+  @media (prefers-color-scheme:dark){ .leaveby{background:rgba(250,70,22,.14)} }
   .vehline{font-size:12.5px;color:var(--muted);margin-top:3px}
   .vehline .save{color:var(--ok);font-weight:700}
   .fuelhint{font-size:12px;color:var(--warn);font-weight:600;margin-top:4px;display:flex;align-items:center;gap:5px}
@@ -411,6 +417,17 @@
         <div class="hint">Applied by each vehicle's fuel type; electric vehicles show no gas cost. Editable estimate — set these to your local prices.</div>
       </div>
       <div class="msec">
+        <div class="subhead">Timing <span class="lt">— how early you like to arrive</span></div>
+        <div class="field"><label>Arrive early by (minutes)</label>
+          <input type="text" inputmode="numeric" id="earlyInput" placeholder="15" autocomplete="off"></div>
+        <div class="hint">Every ride shows a <b>“Leave by”</b> time: the activity's start, minus the real Google drive time, minus this cushion. Pick-ups use the end time the same way.</div>
+      </div>
+      <div class="msec">
+        <div class="subhead">Security</div>
+        <div id="secStatus" class="hint">Checking…</div>
+        <div class="hint" style="margin-top:8px">Your schedule link is the key. Treat it like a password: don't post it publicly, and re-share a new one if it ever leaks.</div>
+      </div>
+      <div class="msec">
         <div class="subhead">Backups <span class="lt">— restore if something gets deleted</span></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
           <button class="btn sm" id="snapNow">💾 Back up now</button>
@@ -496,7 +513,8 @@ const LS_KEY = "familySchedule.data." + SCHED_ID;
 let state = defaultState();
 function defaultState(){
   return { title:"Our Family", buffer:15, dayStart:390, dayEnd:1320, gasPrice:3.20, dieselPrice:3.60,
-           kids:[], drivers:[], places:[], vehicles:[], acts:[], distCache:{}, updatedAt:0 };
+           arriveEarly:15,
+           kids:[], drivers:[], places:[], vehicles:[], acts:[], distCache:{}, timeCache:{}, updatedAt:0 };
 }
 let ui = { view:"week", filter:"all", editingId:null, editDays:[1], editRepeat:"weekly", editKidIds:[],
            weekStart:mondayOf(new Date()), flashIds:[] };
@@ -643,6 +661,16 @@ function repAddrs(act){
 }
 function cachedMiles(oAddr,dAddr){ const v=state.distCache[pairKey(oAddr,dAddr)]; return typeof v==="number"?v:null; }
 function cachedMilesSym(a,b){ if(!a||!b) return null; const v=cachedMiles(a,b); if(v!=null) return v; return cachedMiles(b,a); }
+function cachedMins(oAddr,dAddr){ const v=(state.timeCache||{})[pairKey(oAddr,dAddr)]; return typeof v==="number"?v:null; }
+function cachedMinsSym(a,b){ if(!a||!b) return null; const v=cachedMins(a,b); if(v!=null) return v; return cachedMins(b,a); }
+/* Real Google drive time when we have it; otherwise a rough 30 mph city estimate
+   so a "leave by" still appears for manually-entered miles. */
+function driveMinsFor(oAddr,dAddr,miles){
+  const real=cachedMinsSym(oAddr,dAddr);
+  if(real!=null) return {mins:real, est:false};
+  if(miles!=null && miles>0) return {mins:Math.max(1,Math.round(miles/30*60)), est:true};
+  return {mins:null, est:false};
+}
 function autoMilesFor(act){ const ra=repAddrs(act); if(!ra) return null; return cachedMiles(ra.oAddr,ra.dAddr); }
 function effectiveMiles(act){ if(act.distMiles!=null) return act.distMiles; const am=autoMilesFor(act); return am!=null?am:0; }
 
@@ -680,7 +708,27 @@ function legInfo(act, side){
   const miles = (act.distMiles!=null)? act.distMiles : cachedMilesSym(homeAddr, placeA);
   const v = effVehicle(act, drvId);
   const rt = (miles!=null && v)? roundTrip(v, miles) : null;
-  return { side, drvId, miles, v, rt };
+  const dm = driveMinsFor(homeAddr, placeA, miles);
+  return { side, drvId, miles, v, rt, driveMins:dm.mins, driveEst:dm.est };
+}
+/* When this driver should pull out of the driveway: be at the door `arriveEarly`
+   minutes before the kid needs to be there (or before pick-up time), minus the
+   drive itself. Returns null when we don't know the drive time. */
+function leaveByFor(act, side, occ){
+  const l=legInfo(act, side); if(!l || l.driveMins==null) return null;
+  occ = occ || {start:act.start, end:act.end};
+  const target = side==="drop" ? occ.start : occ.end;
+  const early = +state.arriveEarly||0;
+  let mins = target - l.driveMins - early;
+  const prevDay = mins < 0;
+  if(mins < 0) mins = ((mins % 1440) + 1440) % 1440;
+  return { mins, driveMins:l.driveMins, est:l.driveEst, early, prevDay };
+}
+function leaveByHtml(act, side, occ){
+  const lb=leaveByFor(act, side, occ); if(!lb) return "";
+  return `<div class="leaveby">🕑 Leave by <b>${label12(lb.mins)}</b>`+
+    `<span class="lbmeta">${lb.driveMins} min drive${lb.est?" (est)":""} · ${lb.early} min early`+
+    `${lb.prevDay?" · night before":""}</span></div>`;
 }
 /* Whole-activity economy = drop leg + pick leg (both legs counted). */
 function activityEconomy(act){
@@ -774,6 +822,7 @@ function loadGMaps(){
   return gmapsPromise;
 }
 window.gm_authFailure=function(){ gmapsPromise=null; toast("Google Maps rejected the key — check it and its restrictions"); };
+/* Resolves {miles, mins} — the duration is what powers "leave by". */
 function gmapsDistanceMiles(oAddr,dAddr){
   return loadGMaps().then(g=> new Promise((res,rej)=>{
     const svc=new g.maps.DistanceMatrixService();
@@ -781,15 +830,23 @@ function gmapsDistanceMiles(oAddr,dAddr){
       if(status!=="OK") return rej(new Error(status));
       const el=resp&&resp.rows&&resp.rows[0]&&resp.rows[0].elements&&resp.rows[0].elements[0];
       if(!el||el.status!=="OK") return rej(new Error(el?el.status:"NO_RESULT"));
-      res(el.distance.value/1609.344); // metres → miles
+      res({ miles: el.distance.value/1609.344,
+            mins: el.duration? Math.max(1,Math.round(el.duration.value/60)) : null });
     });
   }));
 }
+function storeLeg(oAddr,dAddr,r){
+  const miles=Math.round(r.miles*10)/10;
+  state.distCache[pairKey(oAddr,dAddr)]=miles;
+  if(r.mins!=null){ state.timeCache=state.timeCache||{}; state.timeCache[pairKey(oAddr,dAddr)]=r.mins; }
+  return miles;
+}
 async function computeDistanceFor(act){
   const ra=repAddrs(act); if(!ra) return null;
-  const cached=cachedMiles(ra.oAddr,ra.dAddr); if(cached!=null) return cached;
-  const miles=Math.round((await gmapsDistanceMiles(ra.oAddr,ra.dAddr))*10)/10;
-  state.distCache[pairKey(ra.oAddr,ra.dAddr)]=miles; saveLocal(); schedulePush();
+  const cached=cachedMiles(ra.oAddr,ra.dAddr);
+  if(cached!=null && cachedMins(ra.oAddr,ra.dAddr)!=null) return cached;
+  const miles=storeLeg(ra.oAddr,ra.dAddr, await gmapsDistanceMiles(ra.oAddr,ra.dAddr));
+  saveLocal(); schedulePush();
   return miles;
 }
 async function computeAllDistances(){
@@ -810,7 +867,8 @@ async function computeAllDistances(){
       const homeA=placeAddr(homeId); if(!homeA) return;
       anyLeg=true;
       const oAddr=side==="drop"?homeA:placeA, dAddr=side==="drop"?placeA:homeA;
-      if(cachedMilesSym(oAddr,dAddr)==null){ const k=pairKey(oAddr,dAddr); if(!seen.has(k)){ seen.add(k); jobs.push({oAddr,dAddr}); } }
+      if(cachedMilesSym(oAddr,dAddr)==null || cachedMinsSym(oAddr,dAddr)==null){
+        const k=pairKey(oAddr,dAddr); if(!seen.has(k)){ seen.add(k); jobs.push({oAddr,dAddr}); } }
     });
     if(!anyLeg) missHome++;
   });
@@ -825,7 +883,7 @@ async function computeAllDistances(){
   }
   if(btn) btn.disabled=true; let done=0,fail=0,lastErr="";
   for(const j of jobs){ say("Calculating "+(done+fail+1)+" of "+jobs.length+"…");
-    try{ const m=Math.round((await gmapsDistanceMiles(j.oAddr,j.dAddr))*10)/10; state.distCache[pairKey(j.oAddr,j.dAddr)]=m; done++; }
+    try{ storeLeg(j.oAddr,j.dAddr, await gmapsDistanceMiles(j.oAddr,j.dAddr)); done++; }
     catch(e){ fail++; lastErr=(e&&e.message)||"error"; } }
   saveLocal(); schedulePush(); render();
   if(btn) btn.disabled=false;
@@ -858,17 +916,54 @@ function showProblem(kind){
   else setSync("off","Offline","No connection to the sync server. Changes are saved on this device.");
 }
 
+/* Access goes through security-definer functions that REQUIRE the schedule id,
+   so the database itself enforces "no link, no data" (see supabase-security.sql).
+   Until that script is run the functions don't exist, so we fall back to the
+   old direct-table path and flag the schedule as not yet locked down. */
+let useRpc=true, hardened=null;   // hardened: true | false | null (unknown yet)
+function sbRpc(fn,args){ return fetch(SB_URL+"/rest/v1/rpc/"+fn,{
+  method:"POST", headers:sbHeaders(), body:JSON.stringify(args) }); }
+async function isRpcMissing(r){
+  if(r.status!==404) return false;
+  try{ const b=await r.clone().json(); if(b&&b.code&&b.code!=="PGRST202") return false; }catch(e){}
+  return true;
+}
+async function remoteGet(){
+  if(useRpc){
+    const r=await sbRpc("schedule_get",{p_id:SCHED_ID});
+    if(r.ok){ hardened=true; const rows=await r.json();
+      return {ok:true, row:(Array.isArray(rows)&&rows[0])?rows[0]:null}; }
+    if(await isRpcMissing(r)){ useRpc=false; hardened=false; }
+    else return {ok:false, r};
+  }
+  const r=await fetch(SB_URL+"/rest/v1/"+TABLE+"?id=eq."+encodeURIComponent(SCHED_ID)+"&select=data,updated_at",
+    {headers:sbHeaders()});
+  if(!r.ok) return {ok:false, r};
+  const rows=await r.json();
+  return {ok:true, row:rows[0]||null};
+}
+async function remotePut(){
+  if(useRpc){
+    const r=await sbRpc("schedule_save",{p_id:SCHED_ID,p_data:state});
+    if(r.ok){ hardened=true; return {ok:true}; }
+    if(await isRpcMissing(r)){ useRpc=false; hardened=false; }
+    else return {ok:false, r};
+  }
+  const body=[{ id:SCHED_ID, data:state, updated_at:new Date(state.updatedAt).toISOString() }];
+  const r=await fetch(SB_URL+"/rest/v1/"+TABLE+"?on_conflict=id",{
+    method:"POST", headers:sbHeaders({Prefer:"resolution=merge-duplicates,return=minimal"}),
+    body:JSON.stringify(body)});
+  return r.ok? {ok:true} : {ok:false, r};
+}
+
 async function cloudPush(){
   dirty=false;
   state.updatedAt = Date.now();
   saveLocal();
   setSync("warn","Saving…");
   try{
-    const body=[{ id:SCHED_ID, data:state, updated_at:new Date(state.updatedAt).toISOString() }];
-    const r=await fetch(SB_URL+"/rest/v1/"+TABLE+"?on_conflict=id",{
-      method:"POST", headers:sbHeaders({Prefer:"resolution=merge-duplicates,return=minimal"}),
-      body:JSON.stringify(body)});
-    if(!r.ok){ showProblem(await classifyFailure(r)); return; }
+    const res=await remotePut();
+    if(!res.ok){ showProblem(await classifyFailure(res.r)); return; }
     everConnected=true; syncProblem=""; setSync("ok","Synced","Everyone with the link sees these changes.");
     maybeSnapshot();
   }catch(e){ showProblem("network"); }
@@ -879,10 +974,9 @@ function schedulePush(){ dirty=true; setSync("warn","…"); clearTimeout(pushTim
 async function cloudPull(){
   if(dirty) return;
   try{
-    const r=await fetch(SB_URL+"/rest/v1/"+TABLE+"?id=eq."+encodeURIComponent(SCHED_ID)+"&select=data,updated_at",
-      {headers:sbHeaders()});
-    if(!r.ok){ showProblem(await classifyFailure(r)); return; }
-    const rows=await r.json();
+    const res=await remoteGet();
+    if(!res.ok){ showProblem(await classifyFailure(res.r)); return; }
+    const rows=res.row?[res.row]:[];
     everConnected=true; syncProblem="";
     if(rows.length){
       const remote=rows[0].data||{};
@@ -923,9 +1017,12 @@ function hasContent(s){ return !!(s && ((s.acts&&s.acts.length) || (s.kids&&s.ki
 async function takeSnapshot(){
   if(snapTableMissing || !hasContent(state)) return false;
   try{
-    const r=await fetch(SB_URL+"/rest/v1/"+SNAP_TABLE,{ method:"POST",
-      headers:sbHeaders({Prefer:"return=minimal"}),
-      body:JSON.stringify([{ schedule_id:SCHED_ID, data:state }]) });
+    let r=await sbRpc("snapshot_add",{p_id:SCHED_ID,p_data:state});
+    if(!r.ok && await isRpcMissing(r)){
+      r=await fetch(SB_URL+"/rest/v1/"+SNAP_TABLE,{ method:"POST",
+        headers:sbHeaders({Prefer:"return=minimal"}),
+        body:JSON.stringify([{ schedule_id:SCHED_ID, data:state }]) });
+    }
     if(!r.ok){ if([401,403,404].includes(r.status)) snapTableMissing=true; throw new Error(r.status); }
     try{ localStorage.setItem(snapStamp(), String(Date.now())); }catch(e){}
     pruneSnapshots();
@@ -939,27 +1036,37 @@ async function maybeSnapshot(){
   takeSnapshot();
 }
 async function listSnapshots(){
-  const r=await fetch(SB_URL+"/rest/v1/"+SNAP_TABLE+"?schedule_id=eq."+encodeURIComponent(SCHED_ID)+
-    "&select=id,created_at&order=created_at.desc&limit=50",{headers:sbHeaders()});
+  let r=await sbRpc("snapshot_list",{p_id:SCHED_ID});
+  if(!r.ok && await isRpcMissing(r)){
+    r=await fetch(SB_URL+"/rest/v1/"+SNAP_TABLE+"?schedule_id=eq."+encodeURIComponent(SCHED_ID)+
+      "&select=id,created_at&order=created_at.desc&limit=50",{headers:sbHeaders()});
+  }
   if(!r.ok){ if([401,403,404].includes(r.status)) snapTableMissing=true; throw new Error(r.status); }
   return r.json();
 }
 async function pruneSnapshots(){
   try{
+    let r=await sbRpc("snapshot_prune",{p_id:SCHED_ID,p_keep:SNAP_KEEP});
+    if(r.ok) return;
+    if(!(await isRpcMissing(r))) return;
     const rows=await listSnapshots();
-    const extra=rows.slice(SNAP_KEEP);
-    for(const row of extra){
+    for(const row of rows.slice(SNAP_KEEP)){
       await fetch(SB_URL+"/rest/v1/"+SNAP_TABLE+"?id=eq."+row.id,{method:"DELETE",headers:sbHeaders()});
     }
   }catch(e){}
 }
 async function restoreSnapshot(id){
-  const r=await fetch(SB_URL+"/rest/v1/"+SNAP_TABLE+"?id=eq."+encodeURIComponent(id)+"&select=data",{headers:sbHeaders()});
-  if(!r.ok) throw new Error(r.status);
-  const rows=await r.json();
-  if(!rows.length) throw new Error("gone");
+  let data=null;
+  let r=await sbRpc("snapshot_get",{p_id:SCHED_ID,p_snap:Number(id)});
+  if(r.ok){ data=await r.json(); }
+  else if(await isRpcMissing(r)){
+    r=await fetch(SB_URL+"/rest/v1/"+SNAP_TABLE+"?id=eq."+encodeURIComponent(id)+"&select=data",{headers:sbHeaders()});
+    if(!r.ok) throw new Error(r.status);
+    const rows=await r.json(); data=rows.length?rows[0].data:null;
+  }else throw new Error(r.status);
+  if(!data) throw new Error("gone");
   await takeSnapshot();                       // snapshot the current state so a restore is undoable
-  state=normalize(rows[0].data);
+  state=normalize(data);
   saveLocal(); render(); await cloudPush();
 }
 function agoLabel(iso){
@@ -1024,8 +1131,10 @@ function normalize(s){
     dayStart:s.dayStart||d.dayStart, dayEnd:s.dayEnd||d.dayEnd,
     gasPrice:(s.gasPrice!=null&&isFinite(+s.gasPrice))?+s.gasPrice:d.gasPrice,
     dieselPrice:(s.dieselPrice!=null&&isFinite(+s.dieselPrice))?+s.dieselPrice:d.dieselPrice,
+    arriveEarly:(s.arriveEarly!=null&&isFinite(+s.arriveEarly))?clamp(+s.arriveEarly,0,120):d.arriveEarly,
     kids, drivers, places, vehicles, acts,
-    distCache:(s.distCache&&typeof s.distCache==="object")?s.distCache:{}, updatedAt:s.updatedAt||0 };
+    distCache:(s.distCache&&typeof s.distCache==="object")?s.distCache:{},
+    timeCache:(s.timeCache&&typeof s.timeCache==="object")?s.timeCache:{}, updatedAt:s.updatedAt||0 };
 }
 
 /* ---------- mutations ---------- */
@@ -1339,7 +1448,7 @@ function activityCard(a, occ, iso){
       <div class="aloc" style="text-transform:none">${esc(recurLabel(a))}${occ.moved?' · <b style="color:var(--warn)">⏰ moved this date</b>':""}</div>
       ${pname?`<div class="aloc">📍 ${esc(pname)}${addr?" — "+esc(addr):""}</div>`:""}
       ${a.notes?`<div class="aloc">📝 ${esc(a.notes)}</div>`:""}
-      ${trans}${distLine}${cl||vehFallback}
+      ${trans}${a.trans?leaveByHtml(a,"drop",occ):""}${distLine}${cl||vehFallback}
       ${dir?`<div class="atrans" style="margin-top:6px">${dir}</div>`:""}
     </div></div>`;
 }
@@ -1364,6 +1473,7 @@ function driverTaskCard(it){
     <div class="abody">
       <div class="big">${verb}${kidDotsHtml(a)} ${line}</div>
       <div class="tmeta">${when}${destAddr?` · 📍 ${esc(destAddr)}`:(placeName(destId)?` · 📍 ${esc(placeName(destId))}`:"")}</div>
+      ${leaveByHtml(a, drop?"drop":"pick", occ)}
       ${route}${distLine}${cl||vehFallback}
       ${a.notes?`<div class="tmeta">📝 ${esc(a.notes)}</div>`:""}
       ${dir?`<div class="atrans" style="margin-top:6px">${dir}</div>`:""}
@@ -1545,9 +1655,11 @@ async function autoFillDistance(){
   const btn=document.getElementById("fAutoBtn"); const old=btn.textContent; btn.disabled=true; btn.textContent="…";
   try{
     let m=cachedMiles(ra.oAddr,ra.dAddr);
-    if(m==null){ m=Math.round((await gmapsDistanceMiles(ra.oAddr,ra.dAddr))*10)/10; state.distCache[pairKey(ra.oAddr,ra.dAddr)]=m; saveLocal(); schedulePush(); }
+    if(m==null || cachedMins(ra.oAddr,ra.dAddr)==null){
+      m=storeLeg(ra.oAddr,ra.dAddr, await gmapsDistanceMiles(ra.oAddr,ra.dAddr)); saveLocal(); schedulePush(); }
     document.getElementById("fDist").value=m; updateFuelHint(); refreshAutoDistHint();
-    toast("Driving distance: "+m+" mi");
+    const mn=cachedMins(ra.oAddr,ra.dAddr);
+    toast("Driving distance: "+m+" mi"+(mn!=null?" · "+mn+" min":""));
   }catch(e){ toast("Couldn't get distance ("+(e.message||"error")+")"); }
   btn.disabled=false; btn.textContent=old;
 }
@@ -1623,9 +1735,24 @@ function openManage(){ renderManage(); document.getElementById("mapsKeyInput").v
   document.getElementById("mapsStatus").textContent=mapsKey()?"Key saved on this device ✓":"";
   document.getElementById("gasPriceInput").value=state.gasPrice!=null?state.gasPrice:"";
   document.getElementById("dieselPriceInput").value=state.dieselPrice!=null?state.dieselPrice:"";
+  document.getElementById("earlyInput").value=state.arriveEarly!=null?state.arriveEarly:"";
   document.getElementById("snapStatus").textContent="";
-  renderSnapshots();
+  renderSnapshots(); renderSecurity();
   showOverlay("ovManage"); }
+/* Is the database actually enforcing "no link, no data"? Probe the locked-down
+   read function; if it isn't installed yet, the table is still world-readable. */
+async function renderSecurity(){
+  const el=document.getElementById("secStatus"); if(!el) return;
+  el.textContent="Checking…";
+  try{
+    const r=await sbRpc("schedule_get",{p_id:SCHED_ID});
+    if(r.ok){ hardened=true;
+      el.innerHTML=`<b style="color:var(--ok)">🔒 Locked down.</b> Only someone with your exact link can read or change this schedule.`;
+    }else if(await isRpcMissing(r)){ hardened=false;
+      el.innerHTML=`<b style="color:var(--danger)">⚠️ Not locked down yet.</b> Anyone who finds this app can currently read every schedule in the database — including your kids' names and addresses. Fix it once: open your Supabase project → SQL Editor → run <b>supabase-security.sql</b>, then reopen this panel.`;
+    }else el.textContent="Couldn't check right now (offline?).";
+  }catch(e){ el.textContent="Couldn't check right now (offline?)."; }
+}
 function emptyHint(t){ return `<div class="hint">${esc(t)}</div>`; }
 function swatchesHtml(pal,cur){ return pal.map(c=>`<span class="sw ${c===cur?"on":""}" data-c="${c}" style="background:${c}"></span>`).join(""); }
 function placeOptions(val){ return `<option value="">— none —</option>`+state.places.map(p=>`<option value="${p.id}" ${p.id===val?"selected":""}>${esc(p.name||"(unnamed)")}</option>`).join(""); }
@@ -1818,6 +1945,8 @@ function wire(){
   };
   document.getElementById("gasPriceInput").oninput=e=>{ state.gasPrice=+e.target.value||0; scheduleSoft(); render(); };
   document.getElementById("dieselPriceInput").oninput=e=>{ state.dieselPrice=+e.target.value||0; scheduleSoft(); render(); };
+  document.getElementById("earlyInput").oninput=e=>{
+    const v=parseInt(e.target.value,10); state.arriveEarly=isFinite(v)?clamp(v,0,120):0; scheduleSoft(); render(); };
   document.getElementById("addKid").onclick=addKid;
   document.getElementById("addDrv").onclick=addDrv;
   document.getElementById("addPlace").onclick=addPlace;
