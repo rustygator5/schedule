@@ -49,6 +49,12 @@
   header.top{position:sticky;top:0;z-index:50;background:var(--panel);
     border-bottom:1px solid var(--line);padding:10px 14px;
     display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .backlink{display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:var(--muted);
+    border:1px solid var(--line);background:var(--panel2);border-radius:9px;padding:7px 11px;font-weight:700;font-size:13px;flex:none}
+  .backlink:hover{background:var(--panel);color:var(--txt)}
+  .backlink .bt{display:inline}
+  @media (max-width:560px){ .backlink .bt{display:none}
+    .backlink{padding:0;min-width:44px;min-height:40px;justify-content:center;font-size:19px} }
   .brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:18px;letter-spacing:-.02em}
   .brand .car{font-size:20px}
   .brand .t1{color:var(--orange)} .brand .t2{color:var(--accent)}
@@ -242,6 +248,7 @@
 </head>
 <body>
 <header class="top">
+  <a class="backlink" href="/" id="backHub" title="Back to Wilson Dashboard">←<span class="bt">Dashboard</span></a>
   <div class="brand"><span class="car">🗓️</span><span class="t1">Family</span><span class="t2">Schedule</span></div>
   <div class="spacer"></div>
   <div class="head-ctrls">
