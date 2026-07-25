@@ -309,7 +309,7 @@
         <div class="rtoggle"><button type="button" id="fRepWeekly">Weekly</button><button type="button" id="fRepOnce">One-time</button></div>
       </div>
       <div id="weeklyBlock">
-        <div class="field"><label>Day of week</label><div class="dowpick" id="fDow"></div></div>
+        <div class="field"><label>Days of week</label><div class="dowpick" id="fDow"></div><div class="hint" id="fDowLabel"></div></div>
         <div class="row2">
           <div class="field"><label>Season start</label><input type="date" id="fStartDate"></div>
           <div class="field"><label>Season end</label><input type="date" id="fEndDate"></div>
@@ -451,7 +451,7 @@ function defaultState(){
   return { title:"Our Family", buffer:15, dayStart:390, dayEnd:1320, gasPrice:3.20, dieselPrice:3.60,
            kids:[], drivers:[], places:[], vehicles:[], acts:[], distCache:{}, updatedAt:0 };
 }
-let ui = { view:"week", filter:"all", editingId:null, editDow:1, editRepeat:"weekly", editKidIds:[],
+let ui = { view:"week", filter:"all", editingId:null, editDays:[1], editRepeat:"weekly", editKidIds:[],
            weekStart:mondayOf(new Date()), flashIds:[] };
 
 /* ---------- time / date helpers ---------- */
@@ -472,11 +472,26 @@ function fmtDateFull(d){ return d.toLocaleDateString(undefined,{weekday:"short",
 function weekDates(ws){ const out=[]; for(let i=0;i<7;i++) out.push(addDays(ws,i)); return out; }
 
 /* ---------- recurrence ---------- */
+/* Weekday list: unique, in range, Mon-first order. Falls back to Monday so an
+   activity can never end up with no day at all. */
+function normDays(list){
+  const out=[];
+  (Array.isArray(list)?list:[]).forEach(d=>{ d=clamp(parseInt(d,10)||0,0,6); if(!out.includes(d)) out.push(d); });
+  out.sort((a,b)=>a-b);
+  return out.length?out:[0];
+}
+function daysLabel(days,long){
+  const ds=normDays(days);
+  if(ds.length===7) return "Every day";
+  if(ds.length===1) return long? DOW_FULL[ds[0]]+"s" : DOW[ds[0]];
+  const n=ds.map(d=>DOW[d]);
+  return n.slice(0,-1).join(", ")+" & "+n[n.length-1];
+}
 function activeOnDate(a, date){
   const iso=isoDate(date);
   if(a.repeat==="once") return a.date===iso;
   const wd=(date.getDay()+6)%7;
-  if(wd!==a.day) return false;
+  if(!(a.days||[]).includes(wd)) return false;
   if(a.startDate && iso < a.startDate) return false;
   if(a.endDate && iso > a.endDate) return false;
   return true;
@@ -811,10 +826,12 @@ function normalize(s){
     const np={id:rid("p"),name:nm,address:"",isHome:false}; places.push(np); return np.id; }
   const acts=Array.isArray(s.acts)?s.acts.map(a=>{
     let placeId=a.placeId||""; if(!placeId && a.loc) placeId=placeIdForName(a.loc);
+    const days=normDays(Array.isArray(a.days)? a.days : (a.day!=null?[a.day]:[]));
     return { id:a.id||rid("a"),
       kidIds: Array.isArray(a.kidIds)? a.kidIds.filter(x=>typeof x==="string") : (a.kidId?[a.kidId]:[]),
       name:a.name||"Activity", placeId,
-      repeat:a.repeat==="once"?"once":"weekly", day:clamp(a.day||0,0,6),
+      repeat:a.repeat==="once"?"once":"weekly",
+      days, day:days[0],
       date:a.date||"", startDate:a.startDate||"", endDate:a.endDate||"",
       start:a.start||960, end:a.end||1020, trans:a.trans!==false,
       dropId:a.dropId||"", pickId:a.pickId||"", dropFromId:a.dropFromId||"", pickToId:a.pickToId||"",
@@ -898,7 +915,7 @@ function computeConflicts(weekStart){
       if(miss.length){ seenUnassigned.add(a.id);
         out.push({sev:"warn",ic:"❓",cat:"Ride not assigned",
           msg:a.name+" — no "+miss.join(" or ")+" driver",
-          sub:actKidNames(a)+" · "+(a.repeat==="once"?fmtDateFull(date):DOW_FULL[a.day])+" "+label12(a.start)+(a.placeId?" · "+placeName(a.placeId):""),
+          sub:actKidNames(a)+" · "+(a.repeat==="once"?fmtDateFull(date):daysLabel(a.days,true))+" "+label12(a.start)+(a.placeId?" · "+placeName(a.placeId):""),
           ids:[a.id]});
       }
     });
@@ -1072,7 +1089,7 @@ function renderAgenda(){
 }
 function recurLabel(a){
   if(a.repeat==="once") return a.date?("One-time · "+fmtDateFull(parseISODate(a.date))):"One-time";
-  const wd=DOW_FULL[a.day]+"s";
+  const wd=daysLabel(a.days,true);
   if(a.startDate||a.endDate){
     const s=a.startDate?fmtDate(parseISODate(a.startDate)):"…";
     const e=a.endDate?fmtDate(parseISODate(a.endDate)):"ongoing";
@@ -1191,7 +1208,7 @@ function openAct(id){
   fillPlaceSelect(document.getElementById("fPlace"), a?a.placeId:"", "none");
   hideNewPlace();
   ui.editRepeat=a?a.repeat:"weekly"; applyRepeatUI();
-  ui.editDow=a?a.day:todayDow(); renderDow();
+  ui.editDays = a? normDays(a.days) : [todayDow()]; renderDow();
   document.getElementById("fStartDate").value=a?a.startDate:"";
   document.getElementById("fEndDate").value=a?a.endDate:"";
   document.getElementById("fDate").value=(a&&a.repeat==="once"&&a.date)?a.date:isoDate(new Date());
@@ -1222,8 +1239,16 @@ function renderKidChips(){
   });
 }
 function renderDow(){
-  document.getElementById("fDow").innerHTML=DOW.map((d,i)=>`<button type="button" data-d="${i}" class="${i===ui.editDow?"on":""}">${d}</button>`).join("");
-  [...document.querySelectorAll("#fDow button")].forEach(b=>b.onclick=()=>{ ui.editDow=+b.dataset.d; renderDow(); });
+  document.getElementById("fDow").innerHTML=DOW.map((d,i)=>`<button type="button" data-d="${i}" class="${ui.editDays.includes(i)?"on":""}">${d}</button>`).join("");
+  [...document.querySelectorAll("#fDow button")].forEach(b=>b.onclick=()=>{
+    const d=+b.dataset.d, i=ui.editDays.indexOf(d);
+    if(i>=0) ui.editDays.splice(i,1); else ui.editDays.push(d);
+    ui.editDays.sort((x,y)=>x-y); renderDow();
+  });
+  const lbl=document.getElementById("fDowLabel");
+  if(lbl) lbl.textContent = !ui.editDays.length ? "Pick at least one day"
+    : ui.editDays.length===7 ? "Repeats every day"
+    : "Repeats "+daysLabel(ui.editDays,true)+(ui.editDays.length>1?" each week":"");
 }
 function toggleTrans(on){ document.getElementById("transbox").classList.toggle("off",!on); }
 function modalRepAddrs(){
@@ -1294,12 +1319,13 @@ function saveAct(){
   if(!name){ toast("Give the activity a name"); return; }
   let start=toMin(document.getElementById("fStart").value), end=toMin(document.getElementById("fEnd").value);
   if(end<=start) end=start+60;
-  const repeat=ui.editRepeat; let day=ui.editDow, date="", startDate="", endDate="";
+  const repeat=ui.editRepeat; let days=normDays(ui.editDays), date="", startDate="", endDate="";
   if(repeat==="once"){
     date=document.getElementById("fDate").value;
     if(!date){ toast("Pick a date for the one-time event"); return; }
-    day=(parseISODate(date).getDay()+6)%7;
+    days=[(parseISODate(date).getDay()+6)%7];
   }else{
+    if(!ui.editDays.length){ toast("Pick at least one day of the week"); return; }
     startDate=document.getElementById("fStartDate").value||"";
     endDate=document.getElementById("fEndDate").value||"";
     if(startDate&&endDate&&endDate<startDate){ toast("End date is before the start date"); return; }
@@ -1308,7 +1334,7 @@ function saveAct(){
   const distMiles=distRaw===""?null:(isFinite(+distRaw)&&+distRaw>=0?+distRaw:null);
   if(!ui.editKidIds.length){ toast("Pick at least one child"); return; }
   const rec={ kidIds:ui.editKidIds.slice(), name, placeId:document.getElementById("fPlace").value,
-    repeat, day, date, startDate, endDate, start, end,
+    repeat, days, day:days[0], date, startDate, endDate, start, end,
     trans:document.getElementById("fTrans").checked,
     dropId:document.getElementById("fDrop").value, pickId:document.getElementById("fPick").value,
     dropFromId:document.getElementById("fDropFrom").value, pickToId:document.getElementById("fPickTo").value,
