@@ -872,6 +872,20 @@ async function computeAllDistances(){
     });
     if(!anyLeg) missHome++;
   });
+  // Also measure place→place for activities a kid attends on the same weekday,
+  // so the "not enough travel time" check uses a real drive instead of a proxy.
+  state.acts.forEach(a=>state.acts.forEach(b=>{
+    if(a===b || !a.placeId || !b.placeId || a.placeId===b.placeId) return;
+    if(!(a.kidIds||[]).some(k=>(b.kidIds||[]).includes(k))) return;
+    const sameDay = a.repeat==="once"||b.repeat==="once"
+      ? (a.date&&a.date===b.date)
+      : (a.days||[]).some(d=>(b.days||[]).includes(d));
+    if(!sameDay) return;
+    const oAddr=placeAddr(a.placeId), dAddr=placeAddr(b.placeId);
+    if(!oAddr||!dAddr) return;
+    if(cachedMilesSym(oAddr,dAddr)!=null && cachedMinsSym(oAddr,dAddr)!=null) return;
+    const k=pairKey(oAddr,dAddr); if(!seen.has(k)){ seen.add(k); jobs.push({oAddr,dAddr}); }
+  }));
   if(!jobs.length){
     if(missHome||missPlace){
       const bits=[]; if(missHome)bits.push(missHome+" with no driver home address");
@@ -1211,6 +1225,44 @@ function computeConflicts(weekStart){
           msg:a.name+" — no "+miss.join(" or ")+" driver",
           sub:actKidNames(a)+" · "+(a.repeat==="once"?fmtDateFull(date):daysLabel(a.days,true))+" "+label12(a.start)+(a.placeId?" · "+placeName(a.placeId):""),
           ids:[a.id]});
+      }
+    });
+
+    // 5. Not enough time to travel between back-to-back activities.
+    // Times that merely don't overlap can still be impossible: leaving one
+    // activity, driving, and arriving early at the next takes real minutes.
+    const early=+state.arriveEarly||0;
+    const byKid=new Map();
+    occs.forEach(o=>(o.a.kidIds||[]).forEach(kid=>{
+      if(!byKid.has(kid)) byKid.set(kid,[]); byKid.get(kid).push(o); }));
+    byKid.forEach((list,kid)=>{
+      const sorted=list.slice().sort((x,y)=>x.start-y.start);
+      for(let j=1;j<sorted.length;j++){
+        const B=sorted[j];
+        // the latest-finishing commitment that must be done before B begins
+        let A=null;
+        for(let i=0;i<j;i++){ const c=sorted[i]; if(c.end<=B.start && (!A||c.end>A.end)) A=c; }
+        if(!A) continue;
+        if(A.a.placeId && A.a.placeId===B.a.placeId) continue;   // same location, no drive
+        const aAddr=placeAddr(A.a.placeId), bAddr=placeAddr(B.a.placeId);
+        // prefer a real place→place time; else approximate with the known drive to B
+        let mins=cachedMinsSym(aAddr,bAddr), approx=false;
+        if(mins==null){
+          const lb=legInfo(B.a,"drop");
+          if(lb && lb.driveMins!=null){ mins=lb.driveMins; approx=true; }
+        }
+        if(mins==null) continue;                                  // nothing to judge with
+        const need=mins+early, have=B.start-A.end;
+        if(have>=need) continue;
+        const hhmm=n=>{ const h=Math.floor(n/60), m=n%60;
+          return h? (m? h+" hr "+m+" min" : h+" hr") : m+" min"; };
+        out.push({sev:"danger",ic:"⏱",cat:"Not enough travel time",
+          msg:kidName(kid)+" can't get from "+A.a.name+" to "+B.a.name+" in time "+dayLabel,
+          sub:A.a.name+" ends "+label12(A.end)+" and "+B.a.name+" starts "+label12(B.start)+
+              " — only "+hhmm(have)+" for a "+hhmm(mins)+(approx?" (approx)":"")+" drive"+
+              (early?" plus "+early+" min early":"")+
+              ", so the ride would need to leave at "+label12(B.start-need)+".",
+          ids:[A.a.id,B.a.id]});
       }
     });
   });
