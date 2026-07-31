@@ -28,6 +28,7 @@
     font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     background:var(--bg); color:var(--txt); -webkit-text-size-adjust:100%;
     padding-bottom:env(safe-area-inset-bottom);
+    -webkit-tap-highlight-color:rgba(250,70,22,.15);
   }
   body::before{content:"";position:fixed;top:0;left:0;right:0;height:4px;
     background:linear-gradient(90deg,var(--orange),var(--blue));z-index:100}
@@ -115,8 +116,17 @@
   @media (max-width:560px){ .drow .dn{flex:0 0 30%} .drow .dstat{min-width:96px;font-size:12px} }
 
   /* WEEK GRID */
-  .gridscroll{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}
-  .grid{display:grid;grid-template-columns:52px repeat(7,minmax(120px,1fr));min-width:760px;position:relative}
+  /* Horizontal-only scroller. overflow-x:auto alone makes overflow-y compute to
+     auto as well, so the browser has to guess which way each swipe was meant to
+     go — that reads as "sticky" on a phone. Pinning it to one axis lets vertical
+     swipes fall straight through to the page. */
+  .gridscroll{overflow-x:auto;overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x pinch-zoom;
+    border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--shadow)}
+  /* the last hour label overhangs its column, so leave room for it — with the
+     scroller pinned to one axis there is no vertical scroll to reveal it */
+  .grid{display:grid;grid-template-columns:52px repeat(7,minmax(120px,1fr));min-width:760px;position:relative;
+    padding-bottom:12px}
   .ghead{position:sticky;top:0;z-index:6;background:var(--panel);border-bottom:1px solid var(--line);
     padding:8px 4px;text-align:center;font-weight:700;font-size:13px}
   .ghead.today{color:var(--accent)}
@@ -193,7 +203,8 @@
 
   /* MODALS */
   .overlay{position:fixed;inset:0;background:rgba(10,14,20,.55);z-index:200;display:none;
-    align-items:flex-start;justify-content:center;padding:24px 14px;overflow:auto}
+    align-items:flex-start;justify-content:center;padding:24px 14px;overflow:auto;
+    -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
   .overlay.show{display:flex}
   .modal{background:var(--panel);border-radius:16px;width:100%;max-width:540px;box-shadow:0 20px 60px rgba(0,0,0,.35);
     border:1px solid var(--line);animation:pop .14s ease}
@@ -260,7 +271,14 @@
   @media (max-width:640px){
     .brand{font-size:16px}
     select.filter{max-width:140px}
-    .wrap{padding:10px}
+    /* room at the bottom so the ＋ button never sits on top of the last card */
+    .wrap{padding:10px 10px 88px}
+    /* thumb-sized targets for the controls used most on a phone */
+    .iconbtn{width:42px;height:42px;font-size:22px}
+    .seg button{padding:9px 14px}
+    .btn.sm{padding:9px 12px}
+    .weeknav .lbl{min-width:104px}
+    .acard{padding:13px 14px}
   }
   @media (max-width:480px){
     .row2{grid-template-columns:1fr}
@@ -522,7 +540,14 @@ function defaultState(){
            arriveEarly:15,
            kids:[], drivers:[], places:[], vehicles:[], acts:[], distCache:{}, timeCache:{}, updatedAt:0 };
 }
-let ui = { view:"week", filter:"all", editingId:null, editDays:[1], editRepeat:"weekly", editKidIds:[],
+/* Phones start in Agenda — the week grid needs sideways scrolling to read, the
+   agenda doesn't. Whatever the user picks is remembered on that device. */
+const VIEW_KEY="familySchedule.view";
+function initialView(){
+  try{ const v=localStorage.getItem(VIEW_KEY); if(v==="week"||v==="agenda") return v; }catch(e){}
+  return (window.innerWidth||1024) < 700 ? "agenda" : "week";
+}
+let ui = { view:initialView(), filter:"all", editingId:null, editDays:[1], editRepeat:"weekly", editKidIds:[],
            weekStart:mondayOf(new Date()), flashIds:[] };
 
 /* ---------- time / date helpers ---------- */
@@ -2008,8 +2033,9 @@ function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg
   clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),1900); }
 
 function wire(){
-  document.getElementById("segWeek").onclick=()=>{ ui.view="week"; render(); };
-  document.getElementById("segAgenda").onclick=()=>{ ui.view="agenda"; render(); };
+  const setView=v=>{ ui.view=v; try{ localStorage.setItem(VIEW_KEY,v); }catch(e){} render(); };
+  document.getElementById("segWeek").onclick=()=>setView("week");
+  document.getElementById("segAgenda").onclick=()=>setView("agenda");
   document.getElementById("btnPrevWk").onclick=()=>{ ui.weekStart=addDays(ui.weekStart,-7); render(); };
   document.getElementById("btnNextWk").onclick=()=>{ ui.weekStart=addDays(ui.weekStart,7); render(); };
   document.getElementById("btnToday").onclick=()=>{ ui.weekStart=mondayOf(new Date()); render(); };
