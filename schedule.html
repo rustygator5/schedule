@@ -131,6 +131,13 @@
     padding:8px 4px;text-align:center;font-weight:700;font-size:13px}
   .ghead.today{color:var(--accent)}
   .ghead .dow{display:block;font-size:11px;color:var(--muted);font-weight:600}
+  /* Activities with no time yet can't sit on the time axis, so they ride in the
+     day header instead — visible, dated, but explicitly not placed at an hour. */
+  .tbdwrap{display:flex;flex-direction:column;gap:2px;margin-top:5px}
+  .tbdchip{display:block;border-radius:6px;padding:2px 5px;color:#fff;font-size:10.5px;
+    font-weight:700;line-height:1.25;cursor:pointer;text-align:left;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap;border:1px solid rgba(255,255,255,.25)}
+  .tbdchip:hover{filter:brightness(1.06)}
   .gcorner{position:sticky;top:0;left:0;z-index:7;background:var(--panel);border-bottom:1px solid var(--line);border-right:1px solid var(--line)}
   .timecol{position:sticky;left:0;z-index:5;background:var(--panel);border-right:1px solid var(--line)}
   .daycol{position:relative;border-right:1px solid var(--line)}
@@ -165,6 +172,8 @@
   .acard:hover{background:var(--panel2)}
   .acard .atime{flex:none;width:74px;font-weight:700;font-size:13px}
   .acard .atime small{display:block;color:var(--muted);font-weight:600}
+  .acard .atime.tbd{color:var(--warn)}
+  .acard .atime.tbd small{font-size:10.5px;text-transform:none}
   .acard .abody{flex:1;min-width:0}
   .acard .akid{display:inline-flex;align-items:center;gap:6px;font-weight:800}
   .kiddot{width:10px;height:10px;border-radius:50%;flex:none;display:inline-block}
@@ -360,10 +369,12 @@
       <div id="onceBlock" style="display:none">
         <div class="field"><label>Date</label><input type="date" id="fDate"></div>
       </div>
+      <label class="checkline"><input type="checkbox" id="fTBD"> 🕐 Time not known yet (TBD)</label>
       <div class="row2">
         <div class="field"><label>Starts</label><input type="time" id="fStart" value="16:00"></div>
         <div class="field"><label>Ends</label><input type="time" id="fEnd" value="17:00"></div>
       </div>
+      <div class="hint" id="tbdHint" style="display:none">Shows as <b>TBD</b> in the day header instead of sitting on the clock. Open the activity on a specific date to fill in that day's time once you know it — the rest of the series stays TBD.</div>
       <label class="checkline"><input type="checkbox" id="fTrans" checked> Needs a ride (assign drivers)</label>
       <div class="transbox" id="transbox">
         <div class="row2">
@@ -390,7 +401,8 @@
         <div class="transbox">
           <label class="checkline"><input type="checkbox" id="occSkip"> 🚫 Cancel this one date</label>
           <div id="occTimes">
-            <div class="row2">
+            <label class="checkline" id="occSetTimeLine" style="display:none"><input type="checkbox" id="occSetTime"> 🕐 Set the time for this date</label>
+            <div class="row2" id="occTimeFields">
               <div class="field"><label>Starts</label><input type="time" id="occStart"></div>
               <div class="field"><label>Ends</label><input type="time" id="occEnd"></div>
             </div>
@@ -628,7 +640,13 @@ function occurrenceOn(a, date){
   const start=(ex && ex.start!=null)? ex.start : a.start;
   let end=(ex && ex.end!=null)? ex.end : a.end;
   if(end<=start) end=start+60;
-  return { start, end, moved: !!(ex && (ex.start!=null || ex.end!=null)) };
+  // A TBD series carries placeholder start/end so nothing downstream divides by
+  // undefined — `tbd` is what callers must check before showing a clock time.
+  // Pinning one date via the per-date exception is how "this week it's at 4"
+  // gets recorded without committing the rest of the series to a time.
+  const pinned=!!(a.tbd && ex && ex.start!=null);
+  return { start, end, tbd: !!a.tbd && !pinned, pinned,
+    moved: !a.tbd && !!(ex && (ex.start!=null || ex.end!=null)) };
 }
 function exceptCounts(a){
   const ex=a.except||{}; let skips=0, moves=0, swaps=0;
@@ -784,6 +802,9 @@ function legInfo(act, side, iso){
 function leaveByFor(act, side, occ, iso){
   const l=legInfo(act, side, iso); if(!l || l.driveMins==null) return null;
   occ = occ || {start:act.start, end:act.end};
+  // no known start/end means no honest "leave by" — the placeholder would read
+  // as a real departure time, which is worse than showing nothing
+  if(occ.tbd) return null;
   const target = side==="drop" ? occ.start : occ.end;
   const early = +state.arriveEarly||0;
   let mins = target - l.driveMins - early;
@@ -1246,7 +1267,7 @@ function normalize(s){
       repeat:a.repeat==="once"?"once":"weekly",
       days, day:days[0],
       date:a.date||"", startDate:a.startDate||"", endDate:a.endDate||"",
-      start:a.start||960, end:a.end||1020, trans:a.trans!==false,
+      start:a.start||960, end:a.end||1020, tbd:!!a.tbd, trans:a.trans!==false,
       dropId:a.dropId||"", pickId:a.pickId||"", dropFromId:a.dropFromId||"", pickToId:a.pickToId||"",
       vehicleId:a.vehicleId||"", distMiles:(a.distMiles===0||a.distMiles)?+a.distMiles:null,
       except:normExcept(a.except), notes:a.notes||"" };
@@ -1270,9 +1291,17 @@ function computeConflicts(weekStart){
   const seenUnassigned=new Set();
   weekDates(weekStart).forEach(date=>{
     const dayLabel=fmtDateFull(date), iso=isoDate(date);
-    // occurrences actually happening this date (skips removed, moved times applied)
-    const occs=[];
-    state.acts.forEach(a=>{ const o=occurrenceOn(a,date); if(o) occs.push({a,start:o.start,end:o.end}); });
+    // occurrences actually happening this date (skips removed, moved times applied).
+    // TBD ones are held back from every time-based check below — comparing a
+    // placeholder would invent conflicts and, worse, miss real ones — but they
+    // are surfaced as their own notice so an unset time can't quietly slip past.
+    const occs=[], tbds=[];
+    state.acts.forEach(a=>{ const o=occurrenceOn(a,date); if(!o) return;
+      if(o.tbd) tbds.push(a); else occs.push({a,start:o.start,end:o.end}); });
+    if(tbds.length) out.push({sev:"warn",ic:"🕐",cat:"Time not set",
+      msg:tbds.map(a=>a.name).join(" & ")+(tbds.length>1?" still need times ":" still needs a time ")+dayLabel,
+      sub:"Can't check it for clashes or work out a leave-by time until you set one",
+      ids:tbds.map(a=>a.id)});
 
     // 1. Child double-booked
     for(let i=0;i<occs.length;i++) for(let j=i+1;j<occs.length;j++){
@@ -1480,8 +1509,14 @@ function renderWeek(){
   const dates=weekDates(ui.weekStart); const todayIso=isoDate(new Date());
   let head=`<div class="gcorner ghead"></div>`;
   dates.forEach((date,d)=>{
-    const isT=isoDate(date)===todayIso;
-    head+=`<div class="ghead ${isT?"today":""}"><span class="dow">${DOW[d]}</span>${esc(fmtDate(date))}</div>`;
+    const isT=isoDate(date)===todayIso, hiso=isoDate(date);
+    let tbdHtml="";
+    state.acts.forEach(a=>{ if(!passFilter(a,hiso)) return;
+      const o=occurrenceOn(a,date); if(!o||!o.tbd) return;
+      tbdHtml+=`<span class="tbdchip" data-id="${a.id}" data-d="${hiso}" style="background:${actGradient(a)}"
+        title="Time not set yet — tap to set it">🕐 ${esc(a.name)}</span>`; });
+    head+=`<div class="ghead ${isT?"today":""}"><span class="dow">${DOW[d]}</span>${esc(fmtDate(date))}`
+      + (tbdHtml?`<div class="tbdwrap">${tbdHtml}</div>`:"") + `</div>`;
   });
   let timecol=`<div class="timecol daycol" style="height:${H}px">`;
   for(let m=Math.ceil(ds/60)*60;m<=de;m+=60){ const y=(m-ds)*PXMIN;
@@ -1497,7 +1532,7 @@ function renderWeek(){
     const iso=isoDate(date);
     const dayActs=[];
     state.acts.forEach(a=>{ if(!passFilter(a,iso)) return; const o=occurrenceOn(a,date);
-      if(o) dayActs.push({id:a.id,a,start:o.start,end:o.end,moved:o.moved}); });
+      if(o && !o.tbd) dayActs.push({id:a.id,a,start:o.start,end:o.end,moved:o.moved,pinned:o.pinned}); });
     dayActs.sort((x,y)=>x.start-y.start||x.end-y.end);
     const packed=packColumns(dayActs);
     dayActs.forEach(it=>{
@@ -1508,7 +1543,7 @@ function renderWeek(){
       col+=`<div class="ev" data-id="${a.id}" data-d="${iso}" style="top:${top}px;height:${h}px;background:${actGradient(a)};
         left:calc(${left}% + 2px);width:calc(${wpct}% - 4px)">
         ${warnBadge(a,iso)}
-        <div class="en">${it.moved?"⏰ ":""}${esc(a.name)}</div>
+        <div class="en">${it.moved?"⏰ ":(it.pinned?"🕐 ":"")}${esc(a.name)}</div>
         <div class="esub">${label12(it.start)}–${label12(it.end)}${a.placeId?" · "+esc(placeName(a.placeId)):""}</div>
         ${a.trans?transChips(a,iso):""}
       </div>`;
@@ -1516,7 +1551,7 @@ function renderWeek(){
     col+=`</div>`; cols+=col;
   });
   v.innerHTML=`<div class="gridscroll"><div class="grid">${head}${timecol}${cols}</div></div>`;
-  [...v.querySelectorAll(".ev")].forEach(el=> el.onclick=()=>openAct(el.dataset.id, el.dataset.d));
+  [...v.querySelectorAll(".ev,.tbdchip")].forEach(el=> el.onclick=()=>openAct(el.dataset.id, el.dataset.d));
   if(ui.flashIds.length) flashNow();
 }
 function warnBadge(a,iso){ return (a.trans && (!occDropId(a,iso)||!occPickId(a,iso)))?`<span class="warnbadge">❓</span>`:""; }
@@ -1561,13 +1596,14 @@ function renderAgenda(){
     let items=[];
     if(isDriver){
       state.acts.forEach(a=>{ if(!a.trans) return; const o=occurrenceOn(a,date); if(!o) return;
-        if(occDropId(a,iso)===driverId) items.push({t:o.start,type:"drop",a,occ:o,iso});
-        if(occPickId(a,iso)===driverId) items.push({t:o.end,type:"pick",a,occ:o,iso});
+        // no known time yet — sort to the top of the day rather than at a fake hour
+        if(occDropId(a,iso)===driverId) items.push({t:o.tbd?-1:o.start,type:"drop",a,occ:o,iso});
+        if(occPickId(a,iso)===driverId) items.push({t:o.tbd?-1:o.end,type:"pick",a,occ:o,iso});
       });
       items.sort((x,y)=>x.t-y.t);
     }else{
       state.acts.forEach(a=>{ if(!passFilter(a,iso)) return; const o=occurrenceOn(a,date);
-        if(o) items.push({t:o.start,a,occ:o,iso}); });
+        if(o) items.push({t:o.tbd?-1:o.start,a,occ:o,iso}); });
       items.sort((x,y)=>x.t-y.t);
     }
     if(!items.length) return;
@@ -1619,11 +1655,16 @@ function activityCard(a, occ, iso){
   }
   const cl=activityCostLine(a,iso); const v0=effVehicle(a,occDropId(a,iso));
   const vehFallback=(!cl&&v0)?`<div class="vehline">🚗 ${esc(v0.name)}${v0.mpg?` · ${v0.mpg} mpg`:""}</div>`:"";
+  const timeCell=occ.tbd? `<div class="atime tbd">TBD<small>no time yet</small></div>`
+    : `<div class="atime">${label12(occ.start)}<small>${label12(occ.end)}</small></div>`;
+  const whenNote = occ.tbd? ' · <b style="color:var(--warn)">🕐 time not set — tap to set it</b>'
+    : (occ.pinned? ' · <b style="color:var(--accent)">🕐 time set for this date</b>'
+    : (occ.moved? ' · <b style="color:var(--warn)">⏰ moved this date</b>' : ""));
   return `<div class="acard" data-id="${a.id}" data-d="${iso||""}">
-    <div class="atime">${label12(occ.start)}<small>${label12(occ.end)}</small></div>
+    ${timeCell}
     <div class="abody">
       <div><span class="akid">${kidDotsHtml(a)} ${esc(actKidNames(a))}</span><span class="aname">${esc(a.name)}</span></div>
-      <div class="aloc" style="text-transform:none">${esc(recurLabel(a))}${occ.moved?' · <b style="color:var(--warn)">⏰ moved this date</b>':""}</div>
+      <div class="aloc" style="text-transform:none">${esc(recurLabel(a))}${whenNote}</div>
       ${pname?`<div class="aloc">📍 ${esc(pname)}${addr?" — "+esc(addr):""}</div>`:""}
       ${a.notes?`<div class="aloc">📝 ${esc(a.notes)}</div>`:""}
       ${trans}${a.trans?leaveByHtml(a,"drop",occ,iso):""}${distLine}${cl||vehFallback}
@@ -1640,7 +1681,9 @@ function driverTaskCard(it){
   const origAddr=placeAddr(origId), destAddr=placeAddr(destId);
   const verb=drop?`<span class="verb drop">Drop off</span>`:`<span class="verb pick">Pick up</span>`;
   const line=drop?`Get <b>${esc(actKidNames(a))}</b> to <b>${esc(a.name)}</b>`:`Collect <b>${esc(actKidNames(a))}</b> from <b>${esc(a.name)}</b>`;
-  const when=(drop?`Arrive by ${label12(occ.start)}`:`Ready at ${label12(occ.end)}`)+(occ.moved?" ⏰ (moved)":"");
+  const when=occ.tbd? "🕐 Time not set yet"
+    : (drop?`Arrive by ${label12(occ.start)}`:`Ready at ${label12(occ.end)}`)
+      +(occ.moved?" ⏰ (moved)":"")+(occ.pinned?" 🕐 (set for this date)":"");
   const route=(origId||destId)?`<div class="tmeta">${esc(placeName(origId)||"—")} → <b>${esc(placeName(destId)||"—")}</b></div>`:"";
   const legM=legInfo(a, drop?"drop":"pick", iso);
   const em=(legM&&legM.miles!=null)? legM.miles : effectiveMiles(a);
@@ -1704,6 +1747,14 @@ function fillVehSelect(sel,val){
     state.vehicles.map(v=>`<option value="${v.id}">${esc(v.name||"(unnamed)")}${v.mpg?" ("+v.mpg+" mpg)":""}</option>`).join("");
   sel.value=val||"";
 }
+/* TBD hides the series clock rather than removing it: start/end keep their last
+   values underneath so unticking the box restores what was there. */
+function applyTBD(){
+  const on=document.getElementById("fTBD").checked;
+  ["fStart","fEnd"].forEach(id=>{ const el=document.getElementById(id);
+    el.disabled=on; el.style.opacity=on?".45":""; });
+  document.getElementById("tbdHint").style.display=on?"":"none";
+}
 function applyRepeatUI(){
   const weekly=ui.editRepeat==="weekly";
   document.getElementById("fRepWeekly").classList.toggle("on",weekly);
@@ -1728,6 +1779,7 @@ function openAct(id, iso){
   document.getElementById("fDate").value=(a&&a.repeat==="once"&&a.date)?a.date:isoDate(new Date());
   document.getElementById("fStart").value=toHHMM(a?a.start:960);
   document.getElementById("fEnd").value=toHHMM(a?a.end:1020);
+  document.getElementById("fTBD").checked=!!(a&&a.tbd); applyTBD();
   const tr=a?a.trans:true;
   document.getElementById("fTrans").checked=tr; toggleTrans(tr);
   fillDriverSelect(document.getElementById("fDrop"), a?a.dropId:"");
@@ -1744,6 +1796,15 @@ function openAct(id, iso){
   showOverlay("ovAct");
   setTimeout(()=>document.getElementById("fName").focus(),50);
 }
+/* On a TBD series the per-date time fields stay greyed until "Set the time for
+   this date" is ticked; on a normal series they're always live. */
+function applyOccSetTime(){
+  const isTBD=document.getElementById("fTBD").checked;
+  const on=!isTBD || document.getElementById("occSetTime").checked;
+  const f=document.getElementById("occTimeFields");
+  f.style.opacity=on?"":".45";
+  ["occStart","occEnd"].forEach(id=>{ document.getElementById(id).disabled=!on; });
+}
 /* "Just this date" panel — only shown when the editor was opened by tapping a
    specific occurrence, since that's the only time we know which date to change. */
 function renderOccBlock(a){
@@ -1759,6 +1820,13 @@ function renderOccBlock(a){
     const s=(ex&&ex.start!=null)?ex.start:a.start, e=(ex&&ex.end!=null)?ex.end:a.end;
     document.getElementById("occStart").value=toHHMM(s);
     document.getElementById("occEnd").value=toHHMM(e);
+    // On a TBD series, filling in a time is an explicit opt-in per date —
+    // otherwise merely opening a date would silently pin the placeholder to it.
+    const isTBD=!!document.getElementById("fTBD").checked;
+    const pinned=!!(ex&&ex.start!=null);
+    document.getElementById("occSetTimeLine").style.display=isTBD?"":"none";
+    document.getElementById("occSetTime").checked=isTBD?pinned:true;
+    applyOccSetTime();
     // read the PENDING edit, not the saved activity, so "Back to usual" sticks
     const dId=(ex&&typeof ex.dropId==="string")?ex.dropId:a.dropId;
     const pId=(ex&&typeof ex.pickId==="string")?ex.pickId:a.pickId;
@@ -1874,6 +1942,7 @@ function saveNewPlace(){
 function saveAct(){
   const name=document.getElementById("fName").value.trim();
   if(!name){ toast("Give the activity a name"); return; }
+  const tbd=document.getElementById("fTBD").checked;
   let start=toMin(document.getElementById("fStart").value), end=toMin(document.getElementById("fEnd").value);
   if(end<=start) end=start+60;
   const repeat=ui.editRepeat; let days=normDays(ui.editDays), date="", startDate="", endDate="";
@@ -1903,14 +1972,17 @@ function saveAct(){
       if(oe<=os) oe=os+60;
       const od=val("occDrop"), op=val("occPick");
       const e={};
-      if(os!==start || oe!==end){ e.start=os; e.end=oe; }
+      // For a TBD series any time entered IS the news, so store it even when it
+      // happens to equal the placeholder; otherwise only store a real change.
+      if(tbd){ if(document.getElementById("occSetTime").checked){ e.start=os; e.end=oe; } }
+      else if(os!==start || oe!==end){ e.start=os; e.end=oe; }
       if(od!==rec0.dropId) e.dropId=od;      // only store what actually differs
       if(op!==rec0.pickId) e.pickId=op;
       if(Object.keys(e).length) except[ui.editIso]=e; else delete except[ui.editIso];
     }
   }
   const rec={ kidIds:ui.editKidIds.slice(), name, placeId:document.getElementById("fPlace").value,
-    repeat, days, day:days[0], date, startDate, endDate, start, end,
+    repeat, days, day:days[0], date, startDate, endDate, start, end, tbd,
     trans:document.getElementById("fTrans").checked,
     dropId:document.getElementById("fDrop").value, pickId:document.getElementById("fPick").value,
     dropFromId:document.getElementById("fDropFrom").value, pickToId:document.getElementById("fPickTo").value,
@@ -2141,6 +2213,8 @@ function wire(){
   // setup
   document.getElementById("mapsKeyInput").oninput=e=>{ const k=e.target.value.trim(); setMapsKey(k);
     const st=document.getElementById("mapsStatus"); if(st) st.textContent=k?"Key saved on this device ✓":""; };
+  document.getElementById("fTBD").onchange=()=>{ applyTBD(); applyOccSetTime(); };
+  document.getElementById("occSetTime").onchange=applyOccSetTime;
   document.getElementById("mapsCompute").onclick=computeAllDistances;
   document.getElementById("mapsRefreshBoth").onclick=refreshBothDirections;
   document.getElementById("snapNow").onclick=async()=>{
