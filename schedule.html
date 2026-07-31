@@ -466,6 +466,7 @@
           <input type="text" id="mapsKeyInput" class="mono" placeholder="Paste your key — saved only on this device" autocomplete="off"></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
           <button class="btn sm" id="mapsCompute">📏 Calculate driving distances</button>
+          <button class="btn sm" id="mapsRefreshBoth">🔄 Refresh both directions</button>
           <span class="hint" id="mapsStatus"></span>
         </div>
         <div class="hint" style="margin-top:8px">Enable <b>Maps JavaScript API</b> + <b>Distance Matrix API</b> in Google Cloud, restrict the key to your site, then paste it here. Your key stays on this device — never shared or synced; only the resulting mileage is saved. <a href="https://developers.google.com/maps/documentation/javascript/get-api-key" target="_blank" rel="noopener">Get a key →</a></div>
@@ -755,11 +756,27 @@ function legInfo(act, side, iso){
   if(!drvId) return null;
   const homeId = side==="drop"? (act.dropFromId||driverHomeId(drvId)) : (act.pickToId||driverHomeId(drvId));
   const homeAddr=placeAddr(homeId), placeA=placeAddr(act.placeId);
-  const miles = (act.distMiles!=null)? act.distMiles : cachedMilesSym(homeAddr, placeA);
+  let miles = act.distMiles!=null? act.distMiles : null;
+  if(miles===null){
+    if(side==="drop"){
+      miles = cachedMiles(homeAddr, placeA) || cachedMiles(placeA, homeAddr);
+    } else {
+      miles = cachedMiles(placeA, homeAddr) || cachedMiles(homeAddr, placeA);
+    }
+  }
   const v = effVehicle(act, drvId);
   const rt = (miles!=null && v)? roundTrip(v, miles) : null;
-  const dm = driveMinsFor(homeAddr, placeA, miles);
-  return { side, drvId, miles, v, rt, driveMins:dm.mins, driveEst:dm.est };
+  let dmMins=null, dmEst=false;
+  if(side==="drop"){
+    dmMins = cachedMins(homeAddr, placeA) || cachedMins(placeA, homeAddr);
+  } else {
+    dmMins = cachedMins(placeA, homeAddr) || cachedMins(homeAddr, placeA);
+  }
+  if(dmMins===null && miles!=null && miles>0){
+    dmMins = Math.max(1, Math.round(miles/30*60));
+    dmEst = true;
+  }
+  return { side, drvId, miles, v, rt, driveMins:dmMins, driveEst:dmEst };
 }
 /* When this driver should pull out of the driveway: be at the door `arriveEarly`
    minutes before the kid needs to be there (or before pick-up time), minus the
@@ -900,6 +917,48 @@ async function computeDistanceFor(act){
   saveLocal(); schedulePush();
   return miles;
 }
+async function refreshBothDirections(){
+  const status=document.getElementById("mapsStatus"), btn=document.getElementById("mapsRefreshBoth");
+  const say=m=>{ if(status) status.textContent=m; };
+  if(!mapsKey()){ say("Paste your API key in the box above first."); toast("Add your Google Maps key first"); return; }
+  const transActs=state.acts.filter(a=>a.trans);
+  if(!transActs.length){ say("No activities need a ride yet — nothing to refresh."); toast("No ride-needing activities"); return; }
+  // build jobs for BOTH directions of every activity leg
+  const seen=new Set(), jobs=[]; let missHome=0, missPlace=0;
+  transActs.forEach(a=>{
+    const placeA=placeAddr(a.placeId);
+    if(!placeA){ missPlace++; return; }
+    let anyLeg=false;
+    ["drop","pick"].forEach(side=>{
+      const drvId=side==="drop"?a.dropId:a.pickId; if(!drvId) return;
+      const homeId=side==="drop"?(a.dropFromId||driverHomeId(a.dropId)):(a.pickToId||driverHomeId(a.pickId));
+      const homeA=placeAddr(homeId); if(!homeA) return;
+      anyLeg=true;
+      const oAddr=side==="drop"?homeA:placeA, dAddr=side==="drop"?placeA:homeA;
+      const k=pairKey(oAddr,dAddr); if(!seen.has(k)){ seen.add(k); jobs.push({oAddr,dAddr}); }
+    });
+    if(!anyLeg) missHome++;
+  });
+  if(!jobs.length){
+    if(missHome||missPlace){
+      const bits=[]; if(missHome)bits.push(missHome+" with no driver home address");
+      if(missPlace)bits.push(missPlace+" with no place address");
+      say("Nothing to refresh ("+bits.join(", ")+"). Add addresses in Setup, then retry.");
+      toast("Set driver home + place addresses first");
+    }else{ say("No activities to refresh."); toast("No activities"); }
+    return;
+  }
+  if(btn) btn.disabled=true; let done=0,fail=0,lastErr="";
+  for(const j of jobs){ say("Refreshing "+(done+fail+1)+" of "+jobs.length+" directions…");
+    try{ storeLeg(j.oAddr,j.dAddr, await gmapsDistanceMiles(j.oAddr,j.dAddr)); done++; }
+    catch(e){ fail++; lastErr=(e&&e.message)||"error"; } }
+  saveLocal(); schedulePush(); render();
+  if(btn) btn.disabled=false;
+  if(done&&!fail){ say("✓ Refreshed "+done+" direction"+(done>1?"s":"")+"."); toast("Done — "+done+" direction"+(done>1?"s":"")+" refreshed"); }
+  else if(done&&fail){ say("Refreshed "+done+", but "+fail+" failed — "+lastErr+"."); toast(fail+" failed: "+lastErr); }
+  else { say("Couldn't refresh — Google said \""+lastErr+"\". Check the API is enabled + the key restriction."); toast("Failed: "+lastErr); }
+}
+
 async function computeAllDistances(){
   const status=document.getElementById("mapsStatus"), btn=document.getElementById("mapsCompute");
   const say=m=>{ if(status) status.textContent=m; };
@@ -1548,12 +1607,16 @@ function activityCard(a, occ, iso){
   const origAddr=a.trans?placeAddr(a.dropFromId||driverHomeId(occDropId(a,iso))):"";
   const url=dirUrl(origAddr,addr);
   const dir=addr?`<a class="dirbtn" href="${url}" target="_blank" rel="noopener">🧭 Directions</a>`:"";
-  // legs can start from different homes once a driver is swapped — only show a
-  // single distance when both agree, otherwise the cost line tells the story
+  // show both drop and pick distances — they can differ due to different drivers or
+  // different return routes, so both legs matter for planning the full round trip
   const dl=legInfo(a,"drop",iso), pl=legInfo(a,"pick",iso);
-  const ms=[dl&&dl.miles, pl&&pl.miles].filter(m=>m!=null);
-  const em=(ms.length && ms.every(m=>m===ms[0]))? ms[0] : (ms.length?null:effectiveMiles(a));
-  const distLine=em>0?`<div class="vehline">📏 ${em} mi one-way${a.distMiles==null?" (auto)":""}</div>`:"";
+  const dropMi=dl&&dl.miles!=null?dl.miles:null, pickMi=pl&&pl.miles!=null?pl.miles:null;
+  let distLine="";
+  if(dropMi!=null || pickMi!=null){
+    const parts=[]; if(dropMi!=null) parts.push(`⬇ ${dropMi}mi`); if(pickMi!=null) parts.push(`⬆ ${pickMi}mi`);
+    const est=(a.distMiles==null)?" (auto)":"";
+    distLine=`<div class="vehline">📏 ${parts.join(" · ")}${est}</div>`;
+  }
   const cl=activityCostLine(a,iso); const v0=effVehicle(a,occDropId(a,iso));
   const vehFallback=(!cl&&v0)?`<div class="vehline">🚗 ${esc(v0.name)}${v0.mpg?` · ${v0.mpg} mpg`:""}</div>`:"";
   return `<div class="acard" data-id="${a.id}" data-d="${iso||""}">
@@ -2079,6 +2142,7 @@ function wire(){
   document.getElementById("mapsKeyInput").oninput=e=>{ const k=e.target.value.trim(); setMapsKey(k);
     const st=document.getElementById("mapsStatus"); if(st) st.textContent=k?"Key saved on this device ✓":""; };
   document.getElementById("mapsCompute").onclick=computeAllDistances;
+  document.getElementById("mapsRefreshBoth").onclick=refreshBothDirections;
   document.getElementById("snapNow").onclick=async()=>{
     const st=document.getElementById("snapStatus"); st.textContent="Saving…";
     const ok=await takeSnapshot();
