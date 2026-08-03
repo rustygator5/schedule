@@ -138,6 +138,12 @@
     font-weight:700;line-height:1.25;cursor:pointer;text-align:left;overflow:hidden;
     text-overflow:ellipsis;white-space:nowrap;border:1px solid rgba(255,255,255,.25)}
   .tbdchip:hover{filter:brightness(1.06)}
+  /* per-date "who's going" chips: colored = going, grey struck = out that date */
+  .okidrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+  .okid{border-radius:20px;padding:7px 14px;font-weight:700;font-size:13px;color:#fff;
+    cursor:pointer;border:1px solid transparent;user-select:none}
+  .okid.out{background:var(--panel2);color:var(--muted);border-color:var(--line);
+    text-decoration:line-through;font-weight:600}
   .gcorner{position:sticky;top:0;left:0;z-index:7;background:var(--panel);border-bottom:1px solid var(--line);border-right:1px solid var(--line)}
   .timecol{position:sticky;left:0;z-index:5;background:var(--panel);border-right:1px solid var(--line)}
   .daycol{position:relative;border-right:1px solid var(--line)}
@@ -410,6 +416,11 @@
               <div class="field"><label>⬇ Drop-off driver</label><select id="occDrop"></select></div>
               <div class="field"><label>⬆ Pick-up driver</label><select id="occPick"></select></div>
             </div>
+            <div class="field" id="occKidsWrap" style="display:none;margin-top:12px">
+              <label>Who's going this date</label>
+              <div class="okidrow" id="occKids"></div>
+              <div class="hint">Tap a child to mark them out for just this date — the ride still runs for everyone else.</div>
+            </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button type="button" class="btn sm" id="occReset">↩︎ Back to usual</button>
@@ -606,8 +617,9 @@ function activeOnDate(a, date){
   return true;
 }
 /* Per-date exceptions: a.except[ISO] is either {skip:true} (cancelled that day)
-   or {start,end} (this date runs at a different time). */
-function normExcept(x){
+   or any mix of {start,end} (moved time), {dropId,pickId} (driver swap) and
+   {kidsOut:[ids]} (these children sit this date out; the ride still runs). */
+function normExcept(x, kidIds){
   const out={};
   if(x && typeof x==="object") Object.keys(x).forEach(k=>{
     if(!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
@@ -619,6 +631,11 @@ function normExcept(x){
     // "" is a real value here — it means "nobody drives this leg on this date"
     if(typeof v.dropId==="string") e.dropId=v.dropId;
     if(typeof v.pickId==="string") e.pickId=v.pickId;
+    if(Array.isArray(v.kidsOut)){
+      let ko=[...new Set(v.kidsOut.filter(id=>typeof id==="string"))];
+      if(Array.isArray(kidIds)) ko=ko.filter(id=>kidIds.includes(id)); // kid left the series → stale
+      if(ko.length) e.kidsOut=ko;
+    }
     if(Object.keys(e).length) out[k]=e;
   });
   return out;
@@ -629,14 +646,23 @@ function occDropId(a, iso){ const ex=iso?(a.except||{})[iso]:null;
 function occPickId(a, iso){ const ex=iso?(a.except||{})[iso]:null;
   return (ex && typeof ex.pickId==="string")? ex.pickId : a.pickId; }
 function occDriverId(a, side, iso){ return side==="drop"? occDropId(a,iso) : occPickId(a,iso); }
+/* Which children actually go on a given date — kidsOut lists the ones sitting
+   it out, so the carpool keeps running for whoever's left. */
+function occKidsOut(a, iso){ const ex=iso?(a.except||{})[iso]:null;
+  const out=(ex&&Array.isArray(ex.kidsOut))?ex.kidsOut:[];
+  return out.filter(id=>(a.kidIds||[]).includes(id)); }
+function occKidIds(a, iso){ const out=occKidsOut(a,iso);
+  return out.length? (a.kidIds||[]).filter(id=>!out.includes(id)) : (a.kidIds||[]); }
 function hasDriverOverride(a, iso){ const ex=iso?(a.except||{})[iso]:null;
   return !!(ex && (typeof ex.dropId==="string" || typeof ex.pickId==="string")); }
 /* The single source of truth for "does this activity happen on this date, and
    when?" — null when it doesn't (wrong day, out of season, or skipped). */
 function occurrenceOn(a, date){
   if(!activeOnDate(a,date)) return null;
-  const ex=(a.except||{})[isoDate(date)];
+  const iso=isoDate(date), ex=(a.except||{})[iso];
   if(ex && ex.skip) return null;
+  // every child marked out ⇒ no one goes ⇒ the date effectively doesn't happen
+  if((a.kidIds||[]).length && !occKidIds(a,iso).length) return null;
   const start=(ex && ex.start!=null)? ex.start : a.start;
   let end=(ex && ex.end!=null)? ex.end : a.end;
   if(end<=start) end=start+60;
@@ -649,18 +675,19 @@ function occurrenceOn(a, date){
     moved: !a.tbd && !!(ex && (ex.start!=null || ex.end!=null)) };
 }
 function exceptCounts(a){
-  const ex=a.except||{}; let skips=0, moves=0, swaps=0;
+  const ex=a.except||{}; let skips=0, moves=0, swaps=0, outs=0;
   Object.keys(ex).forEach(k=>{ const v=ex[k];
     if(v.skip){ skips++; return; }
     if(v.start!=null||v.end!=null) moves++;
     if(typeof v.dropId==="string"||typeof v.pickId==="string") swaps++;
+    if(Array.isArray(v.kidsOut)&&v.kidsOut.length) outs++;
   });
-  return {skips,moves,swaps,total:skips+moves+swaps};
+  return {skips,moves,swaps,outs,total:skips+moves+swaps+outs};
 }
 function passFilter(a, iso){
   if(ui.filter==="all") return true;
   const [t,id]=ui.filter.split(":");
-  if(t==="kid") return (a.kidIds||[]).includes(id);
+  if(t==="kid") return occKidIds(a,iso).includes(id); // out that date ⇒ not on that kid's day
   if(!a.trans) return false;
   if(iso) return occDropId(a,iso)===id || occPickId(a,iso)===id;
   // no date in hand: match the series or any date this driver was swapped onto
@@ -679,12 +706,14 @@ function placeName(id){ const p=placeById(id); return p?p.name:""; }
 function placeAddr(id){ const p=placeById(id); return p?p.address:""; }
 function driverHomeId(dId){ const d=drvById(dId); return d?d.homePlaceId:""; }
 function vehForLeg(act, driverId){ if(act.vehicleId) return act.vehicleId; const d=drvById(driverId); return d&&d.usualVehicleId?d.usualVehicleId:""; }
-function actKids(a){ return (a.kidIds||[]).map(kidById).filter(Boolean); }
-function actKidNames(a){ const ks=actKids(a); return ks.length? ks.map(k=>k.name).join(" & ") : "?"; }
-function actGradient(a){ const ks=actKids(a); if(!ks.length) return "#888"; if(ks.length===1) return ks[0].color;
+/* All of these take an optional iso: with one, they reflect who actually goes
+   on that date (kidsOut applied); without, the series as configured. */
+function actKids(a, iso){ return (iso?occKidIds(a,iso):(a.kidIds||[])).map(kidById).filter(Boolean); }
+function actKidNames(a, iso){ const ks=actKids(a,iso); return ks.length? ks.map(k=>k.name).join(" & ") : "?"; }
+function actGradient(a, iso){ const ks=actKids(a,iso); if(!ks.length) return "#888"; if(ks.length===1) return ks[0].color;
   const n=ks.length, st=[]; ks.forEach((k,i)=>{ st.push(k.color+" "+Math.round(i*100/n)+"%", k.color+" "+Math.round((i+1)*100/n)+"%"); });
   return "linear-gradient(135deg,"+st.join(",")+")"; }
-function kidDotsHtml(a){ return actKids(a).map(k=>`<span class="kiddot" style="background:${k.color}" title="${esc(k.name)}"></span>`).join(""); }
+function kidDotsHtml(a, iso){ return actKids(a,iso).map(k=>`<span class="kiddot" style="background:${k.color}" title="${esc(k.name)}"></span>`).join(""); }
 
 /* ---------- fuel ---------- */
 function mostEfficient(){ const vs=state.vehicles.filter(v=>v.mpg>0); if(!vs.length) return null;
@@ -1261,8 +1290,8 @@ function normalize(s){
   const acts=Array.isArray(s.acts)?s.acts.map(a=>{
     let placeId=a.placeId||""; if(!placeId && a.loc) placeId=placeIdForName(a.loc);
     const days=normDays(Array.isArray(a.days)? a.days : (a.day!=null?[a.day]:[]));
-    return { id:a.id||rid("a"),
-      kidIds: Array.isArray(a.kidIds)? a.kidIds.filter(x=>typeof x==="string") : (a.kidId?[a.kidId]:[]),
+    const kidIds=Array.isArray(a.kidIds)? a.kidIds.filter(x=>typeof x==="string") : (a.kidId?[a.kidId]:[]);
+    return { id:a.id||rid("a"), kidIds,
       name:a.name||"Activity", placeId,
       repeat:a.repeat==="once"?"once":"weekly",
       days, day:days[0],
@@ -1270,7 +1299,7 @@ function normalize(s){
       start:a.start||960, end:a.end||1020, tbd:!!a.tbd, trans:a.trans!==false,
       dropId:a.dropId||"", pickId:a.pickId||"", dropFromId:a.dropFromId||"", pickToId:a.pickToId||"",
       vehicleId:a.vehicleId||"", distMiles:(a.distMiles===0||a.distMiles)?+a.distMiles:null,
-      except:normExcept(a.except), notes:a.notes||"" };
+      except:normExcept(a.except, kidIds), notes:a.notes||"" };
   }):[];
   return { title:s.title||d.title, buffer:Number.isFinite(s.buffer)?s.buffer:d.buffer,
     dayStart:s.dayStart||d.dayStart, dayEnd:s.dayEnd||d.dayEnd,
@@ -1306,7 +1335,8 @@ function computeConflicts(weekStart){
     // 1. Child double-booked
     for(let i=0;i<occs.length;i++) for(let j=i+1;j<occs.length;j++){
       const x=occs[i],y=occs[j], a=x.a, b=y.a;
-      const shared=(a.kidIds||[]).filter(id=>(b.kidIds||[]).includes(id));
+      // per-date lists: a child marked out of one of the two isn't double-booked
+      const shared=occKidIds(a,iso).filter(id=>occKidIds(b,iso).includes(id));
       if(shared.length && overlaps(x.start,x.end,y.start,y.end)){
         out.push({sev:"danger",ic:"⛔",cat:"Child double-booked",
           msg:shared.map(kidName).join(" & ")+" has two activities at once "+dayLabel,
@@ -1317,8 +1347,8 @@ function computeConflicts(weekStart){
     // transport events
     const T=[];
     occs.forEach(o=>{ const a=o.a; if(!a.trans) return;
-      T.push({actId:a.id,kids:actKidNames(a),type:"drop",driverId:occDropId(a,iso),t:o.start,loc:a.placeId,name:a.name});
-      T.push({actId:a.id,kids:actKidNames(a),type:"pick",driverId:occPickId(a,iso),t:o.end,loc:a.placeId,name:a.name});
+      T.push({actId:a.id,kids:actKidNames(a,iso),type:"drop",driverId:occDropId(a,iso),t:o.start,loc:a.placeId,name:a.name});
+      T.push({actId:a.id,kids:actKidNames(a,iso),type:"pick",driverId:occPickId(a,iso),t:o.end,loc:a.placeId,name:a.name});
     });
     const win=e=>[e.t-buf,e.t+buf];
 
@@ -1372,7 +1402,7 @@ function computeConflicts(weekStart){
     // activity, driving, and arriving early at the next takes real minutes.
     const early=+state.arriveEarly||0;
     const byKid=new Map();
-    occs.forEach(o=>(o.a.kidIds||[]).forEach(kid=>{
+    occs.forEach(o=>occKidIds(o.a,iso).forEach(kid=>{
       if(!byKid.has(kid)) byKid.set(kid,[]); byKid.get(kid).push(o); }));
     byKid.forEach((list,kid)=>{
       const sorted=list.slice().sort((x,y)=>x.start-y.start);
@@ -1513,7 +1543,7 @@ function renderWeek(){
     let tbdHtml="";
     state.acts.forEach(a=>{ if(!passFilter(a,hiso)) return;
       const o=occurrenceOn(a,date); if(!o||!o.tbd) return;
-      tbdHtml+=`<span class="tbdchip" data-id="${a.id}" data-d="${hiso}" style="background:${actGradient(a)}"
+      tbdHtml+=`<span class="tbdchip" data-id="${a.id}" data-d="${hiso}" style="background:${actGradient(a,hiso)}"
         title="Time not set yet — tap to set it">🕐 ${esc(a.name)}</span>`; });
     head+=`<div class="ghead ${isT?"today":""}"><span class="dow">${DOW[d]}</span>${esc(fmtDate(date))}`
       + (tbdHtml?`<div class="tbdwrap">${tbdHtml}</div>`:"") + `</div>`;
@@ -1532,7 +1562,8 @@ function renderWeek(){
     const iso=isoDate(date);
     const dayActs=[];
     state.acts.forEach(a=>{ if(!passFilter(a,iso)) return; const o=occurrenceOn(a,date);
-      if(o && !o.tbd) dayActs.push({id:a.id,a,start:o.start,end:o.end,moved:o.moved,pinned:o.pinned}); });
+      if(o && !o.tbd) dayActs.push({id:a.id,a,start:o.start,end:o.end,moved:o.moved,pinned:o.pinned,
+        out:occKidsOut(a,iso).length>0}); });
     dayActs.sort((x,y)=>x.start-y.start||x.end-y.end);
     const packed=packColumns(dayActs);
     dayActs.forEach(it=>{
@@ -1540,10 +1571,10 @@ function renderWeek(){
       const top=(clamp(it.start,ds,de)-ds)*PXMIN;
       const h=Math.max((clamp(it.end,ds,de)-clamp(it.start,ds,de))*PXMIN, 26);
       const info=packed[a.id]; const wpct=100/info.n; const left=info.i*wpct;
-      col+=`<div class="ev" data-id="${a.id}" data-d="${iso}" style="top:${top}px;height:${h}px;background:${actGradient(a)};
+      col+=`<div class="ev" data-id="${a.id}" data-d="${iso}" style="top:${top}px;height:${h}px;background:${actGradient(a,iso)};
         left:calc(${left}% + 2px);width:calc(${wpct}% - 4px)">
         ${warnBadge(a,iso)}
-        <div class="en">${it.moved?"⏰ ":(it.pinned?"🕐 ":"")}${esc(a.name)}</div>
+        <div class="en">${it.moved?"⏰ ":(it.pinned?"🕐 ":"")}${it.out?"👋 ":""}${esc(a.name)}</div>
         <div class="esub">${label12(it.start)}–${label12(it.end)}${a.placeId?" · "+esc(placeName(a.placeId)):""}</div>
         ${a.trans?transChips(a,iso):""}
       </div>`;
@@ -1657,13 +1688,15 @@ function activityCard(a, occ, iso){
   const vehFallback=(!cl&&v0)?`<div class="vehline">🚗 ${esc(v0.name)}${v0.mpg?` · ${v0.mpg} mpg`:""}</div>`:"";
   const timeCell=occ.tbd? `<div class="atime tbd">TBD<small>no time yet</small></div>`
     : `<div class="atime">${label12(occ.start)}<small>${label12(occ.end)}</small></div>`;
-  const whenNote = occ.tbd? ' · <b style="color:var(--warn)">🕐 time not set — tap to set it</b>'
+  const kOut=iso?occKidsOut(a,iso).map(kidName).filter(Boolean):[];
+  const whenNote = (occ.tbd? ' · <b style="color:var(--warn)">🕐 time not set — tap to set it</b>'
     : (occ.pinned? ' · <b style="color:var(--accent)">🕐 time set for this date</b>'
-    : (occ.moved? ' · <b style="color:var(--warn)">⏰ moved this date</b>' : ""));
+    : (occ.moved? ' · <b style="color:var(--warn)">⏰ moved this date</b>' : "")))
+    + (kOut.length? ` · <b style="color:var(--warn)">👋 ${esc(kOut.join(" & "))} out this date</b>` : "");
   return `<div class="acard" data-id="${a.id}" data-d="${iso||""}">
     ${timeCell}
     <div class="abody">
-      <div><span class="akid">${kidDotsHtml(a)} ${esc(actKidNames(a))}</span><span class="aname">${esc(a.name)}</span></div>
+      <div><span class="akid">${kidDotsHtml(a,iso)} ${esc(actKidNames(a,iso))}</span><span class="aname">${esc(a.name)}</span></div>
       <div class="aloc" style="text-transform:none">${esc(recurLabel(a))}${whenNote}</div>
       ${pname?`<div class="aloc">📍 ${esc(pname)}${addr?" — "+esc(addr):""}</div>`:""}
       ${a.notes?`<div class="aloc">📝 ${esc(a.notes)}</div>`:""}
@@ -1680,7 +1713,7 @@ function driverTaskCard(it){
   const destId=drop?a.placeId:(a.pickToId||homeId);
   const origAddr=placeAddr(origId), destAddr=placeAddr(destId);
   const verb=drop?`<span class="verb drop">Drop off</span>`:`<span class="verb pick">Pick up</span>`;
-  const line=drop?`Get <b>${esc(actKidNames(a))}</b> to <b>${esc(a.name)}</b>`:`Collect <b>${esc(actKidNames(a))}</b> from <b>${esc(a.name)}</b>`;
+  const line=drop?`Get <b>${esc(actKidNames(a,iso))}</b> to <b>${esc(a.name)}</b>`:`Collect <b>${esc(actKidNames(a,iso))}</b> from <b>${esc(a.name)}</b>`;
   const when=occ.tbd? "🕐 Time not set yet"
     : (drop?`Arrive by ${label12(occ.start)}`:`Ready at ${label12(occ.end)}`)
       +(occ.moved?" ⏰ (moved)":"")+(occ.pinned?" 🕐 (set for this date)":"");
@@ -1805,6 +1838,27 @@ function applyOccSetTime(){
   f.style.opacity=on?"":".45";
   ["occStart","occEnd"].forEach(id=>{ document.getElementById(id).disabled=!on; });
 }
+/* Per-date attendance chips. ui.occOut is the pending OUT set — kids added to
+   the series mid-edit default to going simply by not being in it. Only shown
+   for carpools (2+ kids): with one child, "out" and "Cancel this one date"
+   mean the same thing and the cancel box is right above. */
+function renderOccKids(){
+  const wrap=document.getElementById("occKidsWrap"); if(!wrap) return;
+  const show=!!ui.editIso && ui.editKidIds.length>1;
+  wrap.style.display=show?"":"none";
+  if(!show) return;
+  ui.occOut=new Set([...(ui.occOut||[])].filter(id=>ui.editKidIds.includes(id)));
+  const box=document.getElementById("occKids");
+  box.innerHTML=ui.editKidIds.map(id=>{ const k=kidById(id); if(!k) return "";
+    const out=ui.occOut.has(id);
+    return `<span class="okid${out?" out":""}" data-k="${id}"${out?"":` style="background:${k.color}"`}>${esc(k.name)}${out?" — out":""}</span>`;
+  }).join("");
+  [...box.querySelectorAll(".okid")].forEach(el=>el.onclick=()=>{
+    const id=el.dataset.k;
+    if(ui.occOut.has(id)) ui.occOut.delete(id); else ui.occOut.add(id);
+    renderOccKids();
+  });
+}
 /* "Just this date" panel — only shown when the editor was opened by tapping a
    specific occurrence, since that's the only time we know which date to change. */
 function renderOccBlock(a){
@@ -1832,12 +1886,16 @@ function renderOccBlock(a){
     const pId=(ex&&typeof ex.pickId==="string")?ex.pickId:a.pickId;
     fillDriverSelect(document.getElementById("occDrop"), dId);
     fillDriverSelect(document.getElementById("occPick"), pId);
+    ui.occOut=new Set((ex&&Array.isArray(ex.kidsOut))?ex.kidsOut:[]);
+    renderOccKids();
     document.getElementById("occTimes").style.display=skip?"none":"";
     const notes=[];
     if(skip) notes.push("Cancelled on this date.");
     else{
       if(ex && (ex.start!=null||ex.end!=null)) notes.push("Moved from the usual "+label12(a.start)+".");
       if(ex && (typeof ex.dropId==="string"||typeof ex.pickId==="string")) notes.push("Driver swapped for this date only.");
+      if(ex && Array.isArray(ex.kidsOut) && ex.kidsOut.length)
+        notes.push(ex.kidsOut.map(kidName).filter(Boolean).join(" & ")+" out on this date.");
     }
     document.getElementById("occStatus").textContent=notes.join(" ");
   }
@@ -1848,6 +1906,7 @@ function renderOccBlock(a){
     const bits=[]; if(c.skips) bits.push(c.skips+" date"+(c.skips>1?"s":"")+" cancelled");
     if(c.moves) bits.push(c.moves+" time change"+(c.moves>1?"s":""));
     if(c.swaps) bits.push(c.swaps+" driver swap"+(c.swaps>1?"s":""));
+    if(c.outs) bits.push(c.outs+" date"+(c.outs>1?"s":"")+" with a child out");
     document.getElementById("exText").textContent=bits.join(" · ");
   }
 }
@@ -1859,6 +1918,7 @@ function renderKidChips(){
     const id=b.dataset.k, i=ui.editKidIds.indexOf(id);
     if(i>=0) ui.editKidIds.splice(i,1); else ui.editKidIds.push(id);
     renderKidChips();
+    renderOccKids();   // the per-date attendance row tracks the series kid list
   });
 }
 function renderDow(){
@@ -1978,9 +2038,20 @@ function saveAct(){
       else if(os!==start || oe!==end){ e.start=os; e.end=oe; }
       if(od!==rec0.dropId) e.dropId=od;      // only store what actually differs
       if(op!==rec0.pickId) e.pickId=op;
+      if(ui.editKidIds.length>1 && ui.occOut && ui.occOut.size){
+        const ko=ui.editKidIds.filter(id=>ui.occOut.has(id));
+        if(ko.length>=ui.editKidIds.length){ toast("That's everyone — tick 🚫 Cancel this one date instead"); return; }
+        if(ko.length) e.kidsOut=ko;
+      }
       if(Object.keys(e).length) except[ui.editIso]=e; else delete except[ui.editIso];
     }
   }
+  // a kid removed from the series can't stay marked out on other dates
+  Object.keys(except).forEach(k=>{ const v=except[k];
+    if(v && Array.isArray(v.kidsOut)){
+      v.kidsOut=v.kidsOut.filter(id=>ui.editKidIds.includes(id));
+      if(!v.kidsOut.length){ delete v.kidsOut; if(!Object.keys(v).length) delete except[k]; }
+    }});
   const rec={ kidIds:ui.editKidIds.slice(), name, placeId:document.getElementById("fPlace").value,
     repeat, days, day:days[0], date, startDate, endDate, start, end, tbd,
     trans:document.getElementById("fTrans").checked,
