@@ -402,6 +402,11 @@
             <div class="hint" id="fAutoVal"></div>
           </div>
         </div>
+        <div class="field">
+          <label>🛣 Tolls, one way ($)</label>
+          <input type="text" inputmode="decimal" id="fToll" placeholder="e.g. 1.75 — leave blank if none" autocomplete="off">
+          <div class="hint" id="fTollHint">Charged once per crossing. Each ride is there and back, so this is counted twice per driver — and twice again if a second driver does the other leg.</div>
+        </div>
         <div class="fuelhint" id="fFuelHint" style="display:none"></div>
         <div class="hint">Drop-off = there by start time. Pick-up = collected at end. “Leaves from / ends at” default to the driver’s home.</div>
       </div>
@@ -796,6 +801,13 @@ function effVehicle(act, driverId){
 }
 function roundTrip(v, miles){ if(!v||!v.mpg||!miles) return null;
   const gal=(miles*2)/v.mpg, p=priceForFuel(v.fuel); return {gal, price:p, cost: p? gal*p : null}; }
+/* Tolls are charged per one-way crossing and are independent of the vehicle —
+   an electric car pays the same toll. Each leg is a there-and-back run for the
+   driver, so one leg crosses twice: out and home. */
+function legToll(act, side, iso){
+  const t=+act.tollEach; if(!isFinite(t)||t<=0) return 0;
+  return legInfo(act, side, iso)? t*2 : 0;   // no leg ⇒ no crossings
+}
 /* On a long trip, suggest a cheaper option: prefer an EV ("no gas"),
    else the lowest gas-cost vehicle in the fleet. Returns a plain string or "". */
 function cheaperAlt(v, miles, chosenCost){
@@ -870,17 +882,23 @@ function activityEconomy(act, iso){
   let cost=0, gal=0, anyCost=false; const vehs=[];
   legs.forEach(l=>{ if(l.rt){ gal+=l.rt.gal; if(l.rt.cost!=null){ cost+=l.rt.cost; anyCost=true; } }
     if(l.v && !vehs.some(x=>x.id===l.v.id)) vehs.push(l.v); });
-  return { legs, trips:legs.length, cost:anyCost?cost:null, gal, vehs };
+  const toll=legs.reduce((s,l)=>s+legToll(act,l.side,iso),0);
+  return { legs, trips:legs.length, cost:anyCost?cost:null, gal, vehs, toll,
+    total:(anyCost||toll)? cost+toll : null };
 }
 /* Format an economy summary (vehicle names esc'd; HTML-safe). "" if nothing to show. */
-function fmtEconomy(cost, gal, vehs, label){
+function fmtEconomy(cost, gal, vehs, label, toll){
   const vl = vehs.map(v=>esc(v.name)).join(" + ");
+  // tolls are shown separately: they're a real cash cost that a more efficient
+  // car won't reduce, so folding them into the fuel figure would mislead
+  const tollBit = toll>0? ` + 🛣 ${money(toll)} toll` : "";
   if(cost==null){
-    if(vehs.length && vehs.every(v=>v.fuel==="Electric")) return `⚡ ${vl} · no gas cost`;
-    if(gal>0) return `⛽ ${gal.toFixed(1)} gal ${label}${vl?` · ${vl}`:""}`;
-    return "";
+    if(vehs.length && vehs.every(v=>v.fuel==="Electric"))
+      return `⚡ ${vl} · no gas cost${tollBit}`;
+    if(gal>0) return `⛽ ${gal.toFixed(1)} gal ${label}${tollBit}${vl?` · ${vl}`:""}`;
+    return toll>0? `🛣 ${money(toll)} toll ${label}` : "";
   }
-  return `⛽ ~${money(cost)} ${label} · ${gal.toFixed(1)} gal${vl?` · ${vl}`:""}`;
+  return `⛽ ~${money(cost)}${tollBit} ${label} · ${gal.toFixed(1)} gal${vl?` · ${vl}`:""}`;
 }
 /* Savings nudge for the activity, based on its longest leg. Plain string or "". */
 function activitySavings(act, iso){
@@ -891,29 +909,32 @@ function activitySavings(act, iso){
 }
 function activityCostLine(act, iso){
   const e=activityEconomy(act, iso); if(!e) return "";
-  const body=fmtEconomy(e.cost, e.gal, e.vehs, e.trips>1?"both trips":"round trip");
+  const body=fmtEconomy(e.cost, e.gal, e.vehs, e.trips>1?"both trips":"round trip", e.toll);
   if(!body) return "";
   const alt=activitySavings(act, iso);
   return `<div class="vehline">${body}${alt?` <span class="save">· ${esc(alt)}</span>`:""}</div>`;
 }
 function legCostLine(act, side, iso){
   const l=legInfo(act, side, iso); if(!l||!l.v) return "";
-  const body=fmtEconomy(l.rt?l.rt.cost:null, l.rt?l.rt.gal:0, [l.v], "round trip");
+  const body=fmtEconomy(l.rt?l.rt.cost:null, l.rt?l.rt.gal:0, [l.v], "round trip", legToll(act,side,iso));
   if(!body) return "";
   const alt=(l.miles!=null)? cheaperAlt(l.v, l.miles, l.rt?l.rt.cost:null) : "";
   return `<div class="vehline">${body}${alt?` <span class="save">· ${esc(alt)}</span>`:""}</div>`;
 }
+/* Week travel spend. Returns {total, toll} or null — the caller needs to know
+   whether tolls are in there, because "gas" would be the wrong word if so. */
 function weeklyGasCost(){
   const drvFilter = ui.filter.startsWith("drv:")? ui.filter.split(":")[1] : null;
-  const dates=weekDates(ui.weekStart); let total=0, any=false;
+  const dates=weekDates(ui.weekStart); let total=0, toll=0, any=false;
   dates.forEach(dt=>{ const iso=isoDate(dt); state.acts.forEach(a=>{
     if(!passFilter(a,iso)||!a.trans||!occurrenceOn(a,dt)) return;
     if(drvFilter){ // only the legs this driver actually drives
       ["drop","pick"].forEach(side=>{ if(occDriverId(a,side,iso)!==drvFilter) return;
-        const l=legInfo(a,side,iso); if(l&&l.rt&&l.rt.cost!=null){ total+=l.rt.cost; any=true; } });
-    }else{ const e=activityEconomy(a,iso); if(e&&e.cost!=null){ total+=e.cost; any=true; } }
+        const l=legInfo(a,side,iso); if(l&&l.rt&&l.rt.cost!=null){ total+=l.rt.cost; any=true; }
+        const t=legToll(a,side,iso); if(t>0){ total+=t; toll+=t; any=true; } });
+    }else{ const e=activityEconomy(a,iso); if(e&&e.total!=null){ total+=e.total; toll+=e.toll; any=true; } }
   }); });
-  return any? total : null;
+  return any? {total, toll} : null;
 }
 /* Per-driver load for the viewed week: legs driven, round-trip miles and gas cost.
    Counts each occurrence, so a Tue+Thu activity counts twice and a skipped date
@@ -926,10 +947,11 @@ function driverWeekTotals(){
       const drvId = occDriverId(a, side, iso);
       if(!drvId || isNoLeg(drvId)) return;   // a leg nobody drives isn't a ride
       const l=legInfo(a,side,iso);
-      const m=map.get(drvId) || {id:drvId, rides:0, miles:0, cost:0, hasCost:false, hasMiles:false};
+      const m=map.get(drvId) || {id:drvId, rides:0, miles:0, cost:0, toll:0, hasCost:false, hasMiles:false};
       m.rides++;
       if(l && l.miles!=null){ m.miles += l.miles*2; m.hasMiles=true; }
       if(l && l.rt && l.rt.cost!=null){ m.cost += l.rt.cost; m.hasCost=true; }
+      const t=legToll(a,side,iso); if(t>0){ m.toll+=t; m.cost+=t; m.hasCost=true; }
       map.set(drvId,m);
     });
   }); });
@@ -1314,6 +1336,7 @@ function normalize(s){
       start:a.start||960, end:a.end||1020, tbd:!!a.tbd, trans:a.trans!==false,
       dropId:a.dropId||"", pickId:a.pickId||"", dropFromId:a.dropFromId||"", pickToId:a.pickToId||"",
       vehicleId:a.vehicleId||"", distMiles:(a.distMiles===0||a.distMiles)?+a.distMiles:null,
+      tollEach:(a.tollEach!=null&&isFinite(+a.tollEach)&&+a.tollEach>0)?+a.tollEach:null,
       except:normExcept(a.except, kidIds), notes:a.notes||"" };
   }):[];
   return { title:s.title||d.title, buffer:Number.isFinite(s.buffer)?s.buffer:d.buffer,
@@ -1489,7 +1512,8 @@ function actsThisWeek(){ const dates=weekDates(ui.weekStart); const set=new Set(
     state.acts.forEach(a=>{ if(passFilter(a,iso)&&occurrenceOn(a,dt)) set.add(a.id); }); }); return set.size; }
 function renderFilterInfo(){
   const el=document.getElementById("filterinfo"); const n=actsThisWeek();
-  const gc=weeklyGasCost(); const wk=`<b>${n}</b> this week${gc!=null?` · ~${money(gc)} gas`:""}`;
+  const gc=weeklyGasCost();
+  const wk=`<b>${n}</b> this week${gc?` · ~${money(gc.total)} ${gc.toll>0?"travel":"gas"}`:""}`;
   if(ui.filter==="all"){ el.innerHTML=`${wk} · <b>${state.kids.length}</b> kid${state.kids.length===1?"":"s"}`; return; }
   const [t,id]=ui.filter.split(":");
   if(t==="kid") el.innerHTML=`<b>${esc(kidName(id))}</b> · ${wk}`;
@@ -1526,7 +1550,7 @@ function renderDrivers(){
       const d=drvById(r.id); const color=d?d.color:"#888";
       const bits=[`<b>${r.rides}</b> ride${r.rides===1?"":"s"}`];
       if(r.hasMiles) bits.push(`<b>${Math.round(r.miles)}</b> mi`);
-      if(r.hasCost)  bits.push(`<b>~${money(r.cost)}</b>`);
+      if(r.hasCost)  bits.push(`<b>~${money(r.cost)}</b>${r.toll>0?` <span class="lt">(incl. ${money(r.toll)} toll)</span>`:""}`);
       return `<div class="drow" data-drv="${r.id}">
         <span class="dn"><span class="kiddot" style="background:${color}"></span>${esc(drvName(r.id)||"(unnamed)")}</span>
         <span class="dbarwrap"><span class="dbar" style="width:${Math.round(r.rides/maxRides*100)}%;background:${color}"></span></span>
@@ -1848,6 +1872,7 @@ function openAct(id, iso){
   fillPlaceSelect(document.getElementById("fPickTo"), a?a.pickToId:"", "home");
   fillVehSelect(document.getElementById("fVeh"), a?a.vehicleId:"");
   document.getElementById("fDist").value=(a&&a.distMiles!=null)?a.distMiles:"";
+  document.getElementById("fToll").value=(a&&a.tollEach!=null)?a.tollEach:"";
   updateFuelHint(); refreshAutoDistHint();
   document.getElementById("fNotes").value=a?a.notes:"";
   document.getElementById("fDelete").style.display=a?"":"none";
@@ -1979,13 +2004,15 @@ function modalAct(){
   const m=val("fDist").trim();
   return { trans:document.getElementById("fTrans").checked, placeId:val("fPlace"),
     dropId:val("fDrop"), pickId:val("fPick"), dropFromId:val("fDropFrom"), pickToId:val("fPickTo"),
-    vehicleId:val("fVeh"), distMiles: m===""?null:(+m||0) };
+    vehicleId:val("fVeh"), distMiles: m===""?null:(+m||0),
+    tollEach:(function(){ const t=val("fToll").trim().replace(/^\$/,"");
+      return t===""?null:(isFinite(+t)&&+t>0?+t:null); })() };
 }
 function updateFuelHint(){
   const el=document.getElementById("fFuelHint");
   const e=activityEconomy(modalAct());
   let txt="";
-  if(e){ txt=fmtEconomy(e.cost, e.gal, e.vehs, e.trips>1?"both trips":"round trip");
+  if(e){ txt=fmtEconomy(e.cost, e.gal, e.vehs, e.trips>1?"both trips":"round trip", e.toll);
     const alt=activitySavings(modalAct()); if(txt&&alt) txt+=" — "+esc(alt); }
   if(txt){ el.innerHTML=txt; el.style.display=""; } else el.style.display="none";
 }
@@ -2046,6 +2073,8 @@ function saveAct(){
   }
   const distRaw=document.getElementById("fDist").value.trim();
   const distMiles=distRaw===""?null:(isFinite(+distRaw)&&+distRaw>=0?+distRaw:null);
+  const tollRaw=document.getElementById("fToll").value.trim().replace(/^\$/,"");
+  const tollEach=tollRaw===""?null:(isFinite(+tollRaw)&&+tollRaw>0?+tollRaw:null);
   if(!ui.editKidIds.length){ toast("Pick at least one child"); return; }
   // the series values this save is establishing — per-date overrides are stored
   // only where they differ from these
@@ -2090,7 +2119,7 @@ function saveAct(){
     trans:document.getElementById("fTrans").checked,
     dropId:document.getElementById("fDrop").value, pickId:document.getElementById("fPick").value,
     dropFromId:document.getElementById("fDropFrom").value, pickToId:document.getElementById("fPickTo").value,
-    vehicleId:document.getElementById("fVeh").value, distMiles, except:normExcept(except),
+    vehicleId:document.getElementById("fVeh").value, distMiles, tollEach, except:normExcept(except),
     notes:document.getElementById("fNotes").value.trim() };
   if(start<state.dayStart) state.dayStart=Math.floor(start/60)*60;
   if(end>state.dayEnd) state.dayEnd=Math.ceil(end/60)*60;
@@ -2296,6 +2325,7 @@ function wire(){
   document.getElementById("fNewPlaceCancel").onclick=hideNewPlace;
   document.getElementById("fVeh").onchange=updateFuelHint;
   document.getElementById("fDist").oninput=updateFuelHint;
+  document.getElementById("fToll").oninput=updateFuelHint;
   document.getElementById("fAutoBtn").onclick=autoFillDistance;
   document.getElementById("occSkip").onchange=e=>{
     document.getElementById("occTimes").style.display=e.target.checked?"none":"";
