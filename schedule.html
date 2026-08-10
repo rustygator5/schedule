@@ -859,7 +859,12 @@ function cheaperAlt(v, miles, chosenCost, tollEach){
 function legInfo(act, side, iso){
   const drvId = occDriverId(act, side, iso);
   if(!drvId || isNoLeg(drvId)) return null;   // unassigned, or no such leg
-  const homeId = side==="drop"? (act.dropFromId||driverHomeId(drvId)) : (act.pickToId||driverHomeId(drvId));
+  let homeId = side==="drop"? (act.dropFromId||driverHomeId(drvId)) : (act.pickToId||driverHomeId(drvId));
+  // If this leg's home end is unknown but the other leg names one explicitly,
+  // borrow it. Without this, an activity that sets "leaves from" while the
+  // driver has no home in Setup measures the drop and silently drops the
+  // return — one leg shown, one missing, with nothing saying why.
+  if(!homeId) homeId = side==="drop"? act.pickToId : act.dropFromId;
   const homeAddr=placeAddr(homeId), placeA=placeAddr(act.placeId);
   let miles = act.distMiles!=null? act.distMiles : null;
   if(miles===null){
