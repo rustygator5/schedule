@@ -273,6 +273,9 @@
   .drvcard .sub label{font-size:11px;color:var(--muted);font-weight:700;display:block;margin-bottom:3px;text-transform:uppercase;letter-spacing:.03em}
   .drvcard select{width:100%;border:1px solid var(--line);background:var(--panel);color:var(--txt);border-radius:8px;padding:7px}
   .prow,.vrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:10px;padding:8px;background:var(--panel2)}
+  /* own line so it never squeezes the name/MPG/fuel controls on a phone */
+  .vtoll{flex-basis:100%;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);cursor:pointer}
+  .vtoll input{width:18px;height:18px;flex:none}
   .prow input,.vrow input,.vrow select{border:1px solid var(--line);background:var(--panel);color:var(--txt);border-radius:8px;padding:8px;font:inherit;min-width:0}
   .prow .pn{flex:0 0 33%} .prow .pa{flex:1 1 45%}
   .vrow .vn{flex:1 1 40%} .vrow .vm{width:82px} .vrow .vf{width:100px}
@@ -806,20 +809,44 @@ function roundTrip(v, miles){ if(!v||!v.mpg||!miles) return null;
    driver, so one leg crosses twice: out and home. */
 function legToll(act, side, iso){
   const t=+act.tollEach; if(!isFinite(t)||t<=0) return 0;
-  return legInfo(act, side, iso)? t*2 : 0;   // no leg ⇒ no crossings
+  const l=legInfo(act, side, iso); if(!l) return 0;   // no leg ⇒ no crossings
+  if(l.v && l.v.tollExempt) return 0;                 // this car doesn't pay
+  return t*2;
+}
+/* What the toll would have been but for the vehicle's exemption. Kept separate
+   so a $0 toll on an activity that clearly has one can be explained rather
+   than just silently missing. */
+function legTollWaived(act, side, iso){
+  const t=+act.tollEach; if(!isFinite(t)||t<=0) return 0;
+  const l=legInfo(act, side, iso); if(!l) return 0;
+  return (l.v && l.v.tollExempt)? t*2 : 0;
 }
 /* On a long trip, suggest a cheaper option: prefer an EV ("no gas"),
    else the lowest gas-cost vehicle in the fleet. Returns a plain string or "". */
-function cheaperAlt(v, miles, chosenCost){
-  if(!v || miles<LONG_TRIP_MI) return "";
+function cheaperAlt(v, miles, chosenCost, tollEach){
+  if(!v) return "";
+  const t=(+tollEach>0)? +tollEach*2 : 0;      // one leg = two crossings
+  // normally only worth mentioning on a long drive, but a toll can make a
+  // swap worthwhile on a short one too
+  if(miles<LONG_TRIP_MI && t<=0) return "";
+  const tollFor=x=> (x && x.tollExempt)? 0 : t;
   if(v.fuel!=="Electric"){
     const evs=state.vehicles.filter(x=>x.fuel==="Electric"&&x.mpg>0).sort((a,b)=>b.mpg-a.mpg);
-    if(evs.length) return evs[0].name+" would use no gas";
+    if(evs.length) return evs[0].name+" would use no gas"+((t>0&&evs[0].tollExempt)?" and no toll":"");
   }
-  if(chosenCost==null) return "";
-  let best=null,bestCost=Infinity;
-  state.vehicles.forEach(x=>{ const rt=roundTrip(x,miles); if(rt&&rt.cost!=null&&rt.cost<bestCost){ bestCost=rt.cost; best=x; } });
-  if(best && best.id!==v.id && bestCost<chosenCost-0.005) return best.name+" saves ~"+money(chosenCost-bestCost);
+  if(chosenCost==null){
+    // no fuel figure to compare, but an exemption alone can still be the answer
+    if(t>0 && !v.tollExempt){
+      const free=state.vehicles.find(x=>x.tollExempt && x.id!==v.id);
+      if(free) return free.name+" is toll-free (~"+money(t)+")";
+    }
+    return "";
+  }
+  const chosenTotal=chosenCost+tollFor(v);
+  let best=null,bestTotal=Infinity;
+  state.vehicles.forEach(x=>{ const rt=roundTrip(x,miles); if(!rt||rt.cost==null) return;
+    const tot=rt.cost+tollFor(x); if(tot<bestTotal){ bestTotal=tot; best=x; } });
+  if(best && best.id!==v.id && bestTotal<chosenTotal-0.005) return best.name+" saves ~"+money(chosenTotal-bestTotal);
   return "";
 }
 /* Per-leg economy. A leg = one drive there-and-back (drop OR pick), using that
@@ -883,20 +910,25 @@ function activityEconomy(act, iso){
   legs.forEach(l=>{ if(l.rt){ gal+=l.rt.gal; if(l.rt.cost!=null){ cost+=l.rt.cost; anyCost=true; } }
     if(l.v && !vehs.some(x=>x.id===l.v.id)) vehs.push(l.v); });
   const toll=legs.reduce((s,l)=>s+legToll(act,l.side,iso),0);
-  return { legs, trips:legs.length, cost:anyCost?cost:null, gal, vehs, toll,
+  const tollWaived=legs.reduce((s,l)=>s+legTollWaived(act,l.side,iso),0);
+  return { legs, trips:legs.length, cost:anyCost?cost:null, gal, vehs, toll, tollWaived,
     total:(anyCost||toll)? cost+toll : null };
 }
 /* Format an economy summary (vehicle names esc'd; HTML-safe). "" if nothing to show. */
-function fmtEconomy(cost, gal, vehs, label, toll){
+function fmtEconomy(cost, gal, vehs, label, toll, waived){
   const vl = vehs.map(v=>esc(v.name)).join(" + ");
   // tolls are shown separately: they're a real cash cost that a more efficient
   // car won't reduce, so folding them into the fuel figure would mislead
-  const tollBit = toll>0? ` + 🛣 ${money(toll)} toll` : "";
+  let tollBit = toll>0? ` + 🛣 ${money(toll)} toll` : "";
+  // an activity with a toll set but nothing charged needs saying, or the
+  // missing money reads as a bug rather than the exemption doing its job
+  if(waived>0) tollBit += toll>0? ` <span class="save">(other car toll-free)</span>`
+                                : ` · <span class="save">🛣 toll-free vehicle</span>`;
   if(cost==null){
     if(vehs.length && vehs.every(v=>v.fuel==="Electric"))
       return `⚡ ${vl} · no gas cost${tollBit}`;
     if(gal>0) return `⛽ ${gal.toFixed(1)} gal ${label}${tollBit}${vl?` · ${vl}`:""}`;
-    return toll>0? `🛣 ${money(toll)} toll ${label}` : "";
+    return toll>0? `🛣 ${money(toll)} toll ${label}` : (waived>0? `🛣 toll-free vehicle` : "");
   }
   return `⛽ ~${money(cost)}${tollBit} ${label} · ${gal.toFixed(1)} gal${vl?` · ${vl}`:""}`;
 }
@@ -905,20 +937,21 @@ function activitySavings(act, iso){
   const e=activityEconomy(act, iso); if(!e) return "";
   let rep=null; e.legs.forEach(l=>{ if(l.v && l.miles!=null && (!rep || l.miles>rep.miles)) rep=l; });
   if(!rep) return "";
-  return cheaperAlt(rep.v, rep.miles, rep.rt?rep.rt.cost:null);
+  return cheaperAlt(rep.v, rep.miles, rep.rt?rep.rt.cost:null, act.tollEach);
 }
 function activityCostLine(act, iso){
   const e=activityEconomy(act, iso); if(!e) return "";
-  const body=fmtEconomy(e.cost, e.gal, e.vehs, e.trips>1?"both trips":"round trip", e.toll);
+  const body=fmtEconomy(e.cost, e.gal, e.vehs, e.trips>1?"both trips":"round trip", e.toll, e.tollWaived);
   if(!body) return "";
   const alt=activitySavings(act, iso);
   return `<div class="vehline">${body}${alt?` <span class="save">· ${esc(alt)}</span>`:""}</div>`;
 }
 function legCostLine(act, side, iso){
   const l=legInfo(act, side, iso); if(!l||!l.v) return "";
-  const body=fmtEconomy(l.rt?l.rt.cost:null, l.rt?l.rt.gal:0, [l.v], "round trip", legToll(act,side,iso));
+  const body=fmtEconomy(l.rt?l.rt.cost:null, l.rt?l.rt.gal:0, [l.v], "round trip",
+    legToll(act,side,iso), legTollWaived(act,side,iso));
   if(!body) return "";
-  const alt=(l.miles!=null)? cheaperAlt(l.v, l.miles, l.rt?l.rt.cost:null) : "";
+  const alt=(l.miles!=null)? cheaperAlt(l.v, l.miles, l.rt?l.rt.cost:null, act.tollEach) : "";
   return `<div class="vehline">${body}${alt?` <span class="save">· ${esc(alt)}</span>`:""}</div>`;
 }
 /* Week travel spend. Returns {total, toll} or null — the caller needs to know
@@ -1320,7 +1353,7 @@ function normalize(s){
   const drivers=Array.isArray(s.drivers)?s.drivers.map(dv=>({id:dv.id||rid("d"),name:dv.name||"",color:dv.color||DRV_COLORS[0],
     homePlaceId:dv.homePlaceId||"",usualVehicleId:dv.usualVehicleId||""})):[];
   const places=Array.isArray(s.places)?s.places.map(p=>({id:p.id||rid("p"),name:p.name||"",address:p.address||"",isHome:!!p.isHome})):[];
-  const vehicles=Array.isArray(s.vehicles)?s.vehicles.map(v=>({id:v.id||rid("v"),name:v.name||"",mpg:+v.mpg||0,fuel:v.fuel||"Gas"})):[];
+  const vehicles=Array.isArray(s.vehicles)?s.vehicles.map(v=>({id:v.id||rid("v"),name:v.name||"",mpg:+v.mpg||0,fuel:v.fuel||"Gas",tollExempt:!!v.tollExempt})):[];
   function placeIdForName(nm){ if(!nm) return "";
     const ex=places.find(p=>p.name.toLowerCase()===nm.toLowerCase()); if(ex) return ex.id;
     const np={id:rid("p"),name:nm,address:"",isHome:false}; places.push(np); return np.id; }
@@ -2012,7 +2045,7 @@ function updateFuelHint(){
   const el=document.getElementById("fFuelHint");
   const e=activityEconomy(modalAct());
   let txt="";
-  if(e){ txt=fmtEconomy(e.cost, e.gal, e.vehs, e.trips>1?"both trips":"round trip", e.toll);
+  if(e){ txt=fmtEconomy(e.cost, e.gal, e.vehs, e.trips>1?"both trips":"round trip", e.toll, e.tollWaived);
     const alt=activitySavings(modalAct()); if(txt&&alt) txt+=" — "+esc(alt); }
   if(txt){ el.innerHTML=txt; el.style.display=""; } else el.style.display="none";
 }
@@ -2182,7 +2215,9 @@ function vehRowHtml(v){ return `<div class="vrow" data-id="${v.id}">
     <input class="vn" data-f="name" value="${esc(v.name)}" placeholder="e.g. Prius">
     <input class="vm" data-f="mpg" value="${v.mpg||""}" placeholder="MPG" inputmode="decimal">
     <select class="vf" data-f="fuel">${FUEL_TYPES.map(f=>`<option ${v.fuel===f?"selected":""}>${f}</option>`).join("")}</select>
-    <button class="btn danger sm del">✕</button></div>`; }
+    <button class="btn danger sm del">✕</button>
+    <label class="vtoll"><input type="checkbox" data-f="tollExempt" ${v.tollExempt?"checked":""}> 🛣 Exempt from tolls</label>
+    </div>`; }
 function renderManage(){
   document.getElementById("kidList").innerHTML=state.kids.map(kidRowHtml).join("")||emptyHint("No children yet.");
   document.getElementById("drvList").innerHTML=state.drivers.map(drvCardHtml).join("")||emptyHint("No drivers yet.");
@@ -2222,6 +2257,7 @@ function wireManage(){
     row.querySelector('[data-f="name"]').onblur=()=>render();
     row.querySelector('[data-f="mpg"]').oninput=e=>{ v.mpg=+e.target.value||0; scheduleSoft(); };
     row.querySelector('[data-f="fuel"]').onchange=e=>{ v.fuel=e.target.value; scheduleSoft(); };
+    row.querySelector('[data-f="tollExempt"]').onchange=e=>{ v.tollExempt=e.target.checked; scheduleSoft(); render(); };
     row.querySelector(".del").onclick=()=>removeVeh(row.dataset.id);
   });
 }
