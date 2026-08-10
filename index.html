@@ -188,6 +188,9 @@
   .acard .atrans{margin-top:5px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
   .tpill{font-size:11.5px;border:1px solid var(--line);border-radius:20px;padding:2px 9px;display:inline-flex;align-items:center;gap:5px;background:var(--panel2)}
   .tpill.miss{border-color:var(--danger);color:var(--danger);font-weight:700}
+  /* a leg that deliberately doesn't happen: settled, not a gap to chase */
+  .tpill.none{color:var(--muted);border-style:dashed}
+  .chip.none{opacity:.6;border-style:dashed}
   .tpill .who{font-weight:700}
   .dirbtn{font-size:11.5px;border:1px solid var(--line);border-radius:20px;padding:2px 9px;background:var(--panel2);
     color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;font-weight:700}
@@ -640,6 +643,13 @@ function normExcept(x, kidIds){
   });
   return out;
 }
+/* A driver slot holding NOLEG means "this leg doesn't happen" — the child is
+   already there, or gets home another way. Deliberately distinct from "" which
+   means "nobody assigned yet": "" is a gap to chase, NOLEG is a settled answer.
+   Stored in the same field, so per-date overrides work on it for free. */
+const NOLEG="__noleg__";
+const isNoLeg=id=> id===NOLEG;
+const legLabel=side=> side==="drop"? "Already there" : "Own way home";
 /* Who actually drives on a given date — a per-date override wins over the series. */
 function occDropId(a, iso){ const ex=iso?(a.except||{})[iso]:null;
   return (ex && typeof ex.dropId==="string")? ex.dropId : a.dropId; }
@@ -752,7 +762,10 @@ function normAddr(s){ return String(s||"").trim().toLowerCase().replace(/\s+/g,"
 function pairKey(o,d){ return normAddr(o)+"||"+normAddr(d); }
 function repAddrs(act){
   if(!act || !act.trans) return null;
-  const homeId = act.dropId ? (act.dropFromId||driverHomeId(act.dropId)) : (act.pickToId||driverHomeId(act.pickId));
+  // a NOLEG side has no home end — fall through to whichever leg is real
+  const useDrop = act.dropId && !isNoLeg(act.dropId);
+  const homeId = useDrop ? (act.dropFromId||driverHomeId(act.dropId))
+    : (act.pickToId||driverHomeId(isNoLeg(act.pickId)?"":act.pickId));
   const oAddr=placeAddr(homeId), dAddr=placeAddr(act.placeId);
   if(!oAddr||!dAddr) return null;
   return {oAddr,dAddr};
@@ -776,6 +789,7 @@ function effectiveMiles(act){ if(act.distMiles!=null) return act.distMiles; cons
 function money(n){ return "$"+(Math.round(n*100)/100).toFixed(2); }
 function priceForFuel(fuel){ if(fuel==="Diesel") return +state.dieselPrice||0; if(fuel==="Electric") return 0; return +state.gasPrice||0; }
 function effVehicle(act, driverId){
+  if(isNoLeg(driverId)) driverId="";
   const vId = act.vehicleId || (driverId ? vehForLeg(act,driverId)
     : (function(){ const d=drvById(act.dropId||act.pickId); return d?d.usualVehicleId:""; })());
   return vId ? vehById(vId) : null;
@@ -800,7 +814,7 @@ function cheaperAlt(v, miles, chosenCost){
    leg's own driver, home, vehicle and distance. Returns null if not computable. */
 function legInfo(act, side, iso){
   const drvId = occDriverId(act, side, iso);
-  if(!drvId) return null;
+  if(!drvId || isNoLeg(drvId)) return null;   // unassigned, or no such leg
   const homeId = side==="drop"? (act.dropFromId||driverHomeId(drvId)) : (act.pickToId||driverHomeId(drvId));
   const homeAddr=placeAddr(homeId), placeA=placeAddr(act.placeId);
   let miles = act.distMiles!=null? act.distMiles : null;
@@ -843,7 +857,8 @@ function leaveByFor(act, side, occ, iso){
 }
 function leaveByHtml(act, side, occ, iso){
   const lb=leaveByFor(act, side, occ, iso); if(!lb) return "";
-  return `<div class="leaveby">🕑 Leave by <b>${label12(lb.mins)}</b>`+
+  const what=side==="pick"?" to collect":"";
+  return `<div class="leaveby">🕑 Leave by <b>${label12(lb.mins)}</b>${what}`+
     `<span class="lbmeta">${lb.driveMins} min drive${lb.est?" (est)":""} · ${lb.early} min early`+
     `${lb.prevDay?" · night before":""}</span></div>`;
 }
@@ -909,7 +924,7 @@ function driverWeekTotals(){
     if(!a.trans || !occurrenceOn(a,dt)) return;
     ["drop","pick"].forEach(side=>{
       const drvId = occDriverId(a, side, iso);
-      if(!drvId) return;
+      if(!drvId || isNoLeg(drvId)) return;   // a leg nobody drives isn't a ride
       const l=legInfo(a,side,iso);
       const m=map.get(drvId) || {id:drvId, rides:0, miles:0, cost:0, hasCost:false, hasMiles:false};
       m.rides++;
@@ -980,7 +995,7 @@ async function refreshBothDirections(){
     if(!placeA){ missPlace++; return; }
     let anyLeg=false;
     ["drop","pick"].forEach(side=>{
-      const drvId=side==="drop"?a.dropId:a.pickId; if(!drvId) return;
+      const drvId=side==="drop"?a.dropId:a.pickId; if(!drvId||isNoLeg(drvId)) return;
       const homeId=side==="drop"?(a.dropFromId||driverHomeId(a.dropId)):(a.pickToId||driverHomeId(a.pickId));
       const homeA=placeAddr(homeId); if(!homeA) return;
       anyLeg=true;
@@ -1022,7 +1037,7 @@ async function computeAllDistances(){
     if(!placeA){ missPlace++; return; }
     let anyLeg=false;
     ["drop","pick"].forEach(side=>{
-      const drvId=side==="drop"?a.dropId:a.pickId; if(!drvId) return;
+      const drvId=side==="drop"?a.dropId:a.pickId; if(!drvId||isNoLeg(drvId)) return;
       const homeId=side==="drop"?(a.dropFromId||driverHomeId(a.dropId)):(a.pickToId||driverHomeId(a.pickId));
       const homeA=placeAddr(homeId); if(!homeA) return;
       anyLeg=true;
@@ -1347,8 +1362,11 @@ function computeConflicts(weekStart){
     // transport events
     const T=[];
     occs.forEach(o=>{ const a=o.a; if(!a.trans) return;
-      T.push({actId:a.id,kids:actKidNames(a,iso),type:"drop",driverId:occDropId(a,iso),t:o.start,loc:a.placeId,name:a.name});
-      T.push({actId:a.id,kids:actKidNames(a,iso),type:"pick",driverId:occPickId(a,iso),t:o.end,loc:a.placeId,name:a.name});
+      // a leg marked "not needed" is not a transport event at all — including it
+      // would invent driver clashes and inflate the crunch count
+      const dId=occDropId(a,iso), pId=occPickId(a,iso);
+      if(!isNoLeg(dId)) T.push({actId:a.id,kids:actKidNames(a,iso),type:"drop",driverId:dId,t:o.start,loc:a.placeId,name:a.name});
+      if(!isNoLeg(pId)) T.push({actId:a.id,kids:actKidNames(a,iso),type:"pick",driverId:pId,t:o.end,loc:a.placeId,name:a.name});
     });
     const win=e=>[e.t-buf,e.t+buf];
 
@@ -1590,8 +1608,10 @@ function transChips(a,iso){
   const ex=iso?(a.except||{})[iso]:null;
   const d=occDropId(a,iso), p=occPickId(a,iso);
   const dsw=(ex&&typeof ex.dropId==="string")?"↺":"", psw=(ex&&typeof ex.pickId==="string")?"↺":"";
-  const dp=d?`<span class="chip">⬇ ${dsw}${esc(drvName(d))}</span>`:`<span class="chip miss">⬇ ?</span>`;
-  const pk=p?`<span class="chip">⬆ ${psw}${esc(drvName(p))}</span>`:`<span class="chip miss">⬆ ?</span>`;
+  const dp=isNoLeg(d)?`<span class="chip none">⬇ —</span>`
+    :(d?`<span class="chip">⬇ ${dsw}${esc(drvName(d))}</span>`:`<span class="chip miss">⬇ ?</span>`);
+  const pk=isNoLeg(p)?`<span class="chip none">⬆ —</span>`
+    :(p?`<span class="chip">⬆ ${psw}${esc(drvName(p))}</span>`:`<span class="chip miss">⬆ ?</span>`);
   const veh=(a.vehicleId&&vehById(a.vehicleId))?`<span class="chip veh">🚗 ${esc(vehById(a.vehicleId).name)}</span>`:"";
   const fuel=fuelHintFor(a)?`<span class="chip veh">⛽</span>`:"";
   return `<div class="etr">${dp}${pk}${veh}${fuel}</div>`;
@@ -1667,11 +1687,15 @@ function activityCard(a, occ, iso){
     const ex=iso?(a.except||{})[iso]:null;
     const d=occDropId(a,iso), p=occPickId(a,iso);
     const dsw=(ex&&typeof ex.dropId==="string")?" ↺":"", psw=(ex&&typeof ex.pickId==="string")?" ↺":"";
-    const dp=d?`<span class="tpill">⬇ Drop-off <span class="who">${esc(drvName(d))}${dsw}</span></span>`:`<span class="tpill miss">⬇ Drop-off: none</span>`;
-    const pk=p?`<span class="tpill">⬆ Pick-up <span class="who">${esc(drvName(p))}${psw}</span></span>`:`<span class="tpill miss">⬆ Pick-up: none</span>`;
+    const dp=isNoLeg(d)?`<span class="tpill none">⬇ ${legLabel("drop")}</span>`
+      :(d?`<span class="tpill">⬇ Drop-off <span class="who">${esc(drvName(d))}${dsw}</span></span>`:`<span class="tpill miss">⬇ Drop-off: none</span>`);
+    const pk=isNoLeg(p)?`<span class="tpill none">⬆ ${legLabel("pick")}</span>`
+      :(p?`<span class="tpill">⬆ Pick-up <span class="who">${esc(drvName(p))}${psw}</span></span>`:`<span class="tpill miss">⬆ Pick-up: none</span>`);
     trans=`<div class="atrans">${dp}${pk}</div>`;
   }else trans=`<div class="atrans"><span class="tpill">🏠 No ride needed</span></div>`;
-  const origAddr=a.trans?placeAddr(a.dropFromId||driverHomeId(occDropId(a,iso))):"";
+  // with no drop-off leg, directions should start from whoever collects them
+  const routeDrv=isNoLeg(occDropId(a,iso))? occPickId(a,iso) : occDropId(a,iso);
+  const origAddr=a.trans?placeAddr(a.dropFromId||driverHomeId(isNoLeg(routeDrv)?"":routeDrv)):"";
   const url=dirUrl(origAddr,addr);
   const dir=addr?`<a class="dirbtn" href="${url}" target="_blank" rel="noopener">🧭 Directions</a>`:"";
   // show both drop and pick distances — they can differ due to different drivers or
@@ -1684,7 +1708,7 @@ function activityCard(a, occ, iso){
     const est=(a.distMiles==null)?" (auto)":"";
     distLine=`<div class="vehline">📏 ${parts.join(" · ")}${est}</div>`;
   }
-  const cl=activityCostLine(a,iso); const v0=effVehicle(a,occDropId(a,iso));
+  const cl=activityCostLine(a,iso); const v0=effVehicle(a,routeDrv);
   const vehFallback=(!cl&&v0)?`<div class="vehline">🚗 ${esc(v0.name)}${v0.mpg?` · ${v0.mpg} mpg`:""}</div>`:"";
   const timeCell=occ.tbd? `<div class="atime tbd">TBD<small>no time yet</small></div>`
     : `<div class="atime">${label12(occ.start)}<small>${label12(occ.end)}</small></div>`;
@@ -1700,7 +1724,7 @@ function activityCard(a, occ, iso){
       <div class="aloc" style="text-transform:none">${esc(recurLabel(a))}${whenNote}</div>
       ${pname?`<div class="aloc">📍 ${esc(pname)}${addr?" — "+esc(addr):""}</div>`:""}
       ${a.notes?`<div class="aloc">📝 ${esc(a.notes)}</div>`:""}
-      ${trans}${a.trans?leaveByHtml(a,"drop",occ,iso):""}${distLine}${cl||vehFallback}
+      ${trans}${a.trans?leaveByHtml(a, isNoLeg(occDropId(a,iso))?"pick":"drop", occ,iso):""}${distLine}${cl||vehFallback}
       ${dir?`<div class="atrans" style="margin-top:6px">${dir}</div>`:""}
     </div></div>`;
 }
@@ -1765,8 +1789,11 @@ function wireEmpty(){
 }
 
 /* ================= ACTIVITY MODAL ================= */
-function fillDriverSelect(sel,val){
-  sel.innerHTML=`<option value="">— none / not set —</option>`+
+function fillDriverSelect(sel,val,side){
+  // NOLEG is offered only where we know which leg it is, so the wording can be
+  // concrete ("already there" reads very differently from "own way home")
+  const noneOpt = side? `<option value="${NOLEG}">🚫 Not needed — ${esc(legLabel(side).toLowerCase())}</option>` : "";
+  sel.innerHTML=`<option value="">— none / not set —</option>`+noneOpt+
     state.drivers.map(d=>`<option value="${d.id}">${esc(d.name)}</option>`).join("");
   sel.value=val||"";
 }
@@ -1815,8 +1842,8 @@ function openAct(id, iso){
   document.getElementById("fTBD").checked=!!(a&&a.tbd); applyTBD();
   const tr=a?a.trans:true;
   document.getElementById("fTrans").checked=tr; toggleTrans(tr);
-  fillDriverSelect(document.getElementById("fDrop"), a?a.dropId:"");
-  fillDriverSelect(document.getElementById("fPick"), a?a.pickId:"");
+  fillDriverSelect(document.getElementById("fDrop"), a?a.dropId:"", "drop");
+  fillDriverSelect(document.getElementById("fPick"), a?a.pickId:"", "pick");
   fillPlaceSelect(document.getElementById("fDropFrom"), a?a.dropFromId:"", "home");
   fillPlaceSelect(document.getElementById("fPickTo"), a?a.pickToId:"", "home");
   fillVehSelect(document.getElementById("fVeh"), a?a.vehicleId:"");
@@ -1884,8 +1911,8 @@ function renderOccBlock(a){
     // read the PENDING edit, not the saved activity, so "Back to usual" sticks
     const dId=(ex&&typeof ex.dropId==="string")?ex.dropId:a.dropId;
     const pId=(ex&&typeof ex.pickId==="string")?ex.pickId:a.pickId;
-    fillDriverSelect(document.getElementById("occDrop"), dId);
-    fillDriverSelect(document.getElementById("occPick"), pId);
+    fillDriverSelect(document.getElementById("occDrop"), dId, "drop");
+    fillDriverSelect(document.getElementById("occPick"), pId, "pick");
     ui.occOut=new Set((ex&&Array.isArray(ex.kidsOut))?ex.kidsOut:[]);
     renderOccKids();
     document.getElementById("occTimes").style.display=skip?"none":"";
@@ -1936,7 +1963,8 @@ function renderDow(){
 function toggleTrans(on){ document.getElementById("transbox").classList.toggle("off",!on); }
 function modalRepAddrs(){
   const dropId=val("fDrop"), pickId=val("fPick"), dropFrom=val("fDropFrom"), pickTo=val("fPickTo"), placeId=val("fPlace");
-  const homeId = dropId? (dropFrom||driverHomeId(dropId)) : (pickTo||driverHomeId(pickId));
+  const homeId = (dropId && !isNoLeg(dropId))? (dropFrom||driverHomeId(dropId))
+    : (pickTo||driverHomeId(isNoLeg(pickId)?"":pickId));
   const oAddr=placeAddr(homeId), dAddr=placeAddr(placeId);
   if(!oAddr||!dAddr) return null;
   return {oAddr,dAddr};
@@ -2022,6 +2050,9 @@ function saveAct(){
   // the series values this save is establishing — per-date overrides are stored
   // only where they differ from these
   const rec0={ dropId:val("fDrop"), pickId:val("fPick") };
+  const needsRide=document.getElementById("fTrans").checked;
+  if(needsRide && isNoLeg(rec0.dropId) && isNoLeg(rec0.pickId)){
+    toast("Both legs not needed — untick “Needs a ride” instead"); return; }
   // fold the "just this date" panel into the exception map
   const except=Object.assign({},ui.editExcept);
   if(ui.editingId && ui.editIso){
@@ -2031,6 +2062,8 @@ function saveAct(){
       let oe=toMin(document.getElementById("occEnd").value);
       if(oe<=os) oe=os+60;
       const od=val("occDrop"), op=val("occPick");
+      if(needsRide && isNoLeg(od) && isNoLeg(op)){
+        toast("Both legs not needed on that date — tick 🚫 Cancel this one date instead"); return; }
       const e={};
       // For a TBD series any time entered IS the news, so store it even when it
       // happens to equal the placeholder; otherwise only store a real change.
