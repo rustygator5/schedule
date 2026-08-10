@@ -397,14 +397,20 @@
           <div class="field"><label>Drop-off leaves from</label><select id="fDropFrom"></select></div>
           <div class="field"><label>Pick-up ends at</label><select id="fPickTo"></select></div>
         </div>
+        <div class="field"><label>Vehicle</label><select id="fVeh"></select></div>
         <div class="row2">
-          <div class="field"><label>Vehicle</label><select id="fVeh"></select></div>
           <div class="field">
-            <label>One-way miles</label>
-            <div class="selrow"><input type="text" inputmode="decimal" id="fDist" placeholder="auto / manual" autocomplete="off"><button type="button" class="btn sm" id="fAutoBtn" title="Calculate driving distance">📍 Auto</button></div>
+            <label>⬇ Drop-off miles (one way)</label>
+            <div class="selrow"><input type="text" inputmode="decimal" id="fDist" placeholder="auto / manual" autocomplete="off"><button type="button" class="btn sm" id="fAutoBtn" title="Measure the drop-off leg">📍 Auto</button></div>
             <div class="hint" id="fAutoVal"></div>
           </div>
+          <div class="field">
+            <label>⬆ Pick-up miles (one way)</label>
+            <div class="selrow"><input type="text" inputmode="decimal" id="fDistPick" placeholder="auto / manual" autocomplete="off"><button type="button" class="btn sm" id="fAutoBtnPick" title="Measure the pick-up leg">📍 Auto</button></div>
+            <div class="hint" id="fAutoValPick"></div>
+          </div>
         </div>
+        <div class="hint">The two legs can be different journeys — dropping off from school then driving home covers no miles one way and the full distance the other. Measure each separately.</div>
         <div class="field">
           <label>🛣 Tolls, one way ($)</label>
           <div class="selrow"><input type="text" inputmode="decimal" id="fToll" placeholder="e.g. 1.75 — leave blank if none" autocomplete="off"><button type="button" class="btn sm" id="fTollAuto" title="Ask Google for a toll estimate">🛣 Estimate</button></div>
@@ -866,13 +872,16 @@ function legInfo(act, side, iso){
   // return — one leg shown, one missing, with nothing saying why.
   if(!homeId) homeId = side==="drop"? act.pickToId : act.dropFromId;
   const homeAddr=placeAddr(homeId), placeA=placeAddr(act.placeId);
-  let miles = act.distMiles!=null? act.distMiles : null;
+  // Each leg carries its own manual figure. A single shared one can't describe
+  // both when the ends differ — leaving school for home is zero miles one way
+  // and the full run the other, and one number forces the same value on both.
+  const manual = side==="drop"? act.distDrop : act.distPick;
+  let miles = manual!=null? manual : null;
   if(miles===null){
-    if(side==="drop"){
-      miles = cachedMiles(homeAddr, placeA) || cachedMiles(placeA, homeAddr);
-    } else {
-      miles = cachedMiles(placeA, homeAddr) || cachedMiles(homeAddr, placeA);
-    }
+    // same address at both ends ⇒ no drive, definitionally zero rather than unknown
+    if(homeAddr && placeA && normAddr(homeAddr)===normAddr(placeA)) miles = 0;
+    else if(side==="drop") miles = cachedMiles(homeAddr, placeA) || cachedMiles(placeA, homeAddr);
+    else miles = cachedMiles(placeA, homeAddr) || cachedMiles(homeAddr, placeA);
   }
   const v = effVehicle(act, drvId);
   const rt = (miles!=null && v)? roundTrip(v, miles) : null;
@@ -1415,6 +1424,7 @@ function loadLocal(){ try{ const s=localStorage.getItem(LS_KEY); if(s) state=nor
 
 function normalize(s){
   const d=defaultState(); s=s||{};
+  const num=v=>(v===0||v)&&isFinite(+v)&&+v>=0? +v : null;
   const kids=Array.isArray(s.kids)?s.kids.map(k=>({id:k.id||rid("k"),name:k.name||"",color:k.color||KID_COLORS[0]})):[];
   const drivers=Array.isArray(s.drivers)?s.drivers.map(dv=>({id:dv.id||rid("d"),name:dv.name||"",color:dv.color||DRV_COLORS[0],
     homePlaceId:dv.homePlaceId||"",usualVehicleId:dv.usualVehicleId||""})):[];
@@ -1434,7 +1444,16 @@ function normalize(s){
       date:a.date||"", startDate:a.startDate||"", endDate:a.endDate||"",
       start:a.start||960, end:a.end||1020, tbd:!!a.tbd, trans:a.trans!==false,
       dropId:a.dropId||"", pickId:a.pickId||"", dropFromId:a.dropFromId||"", pickToId:a.pickToId||"",
-      vehicleId:a.vehicleId||"", distMiles:(a.distMiles===0||a.distMiles)?+a.distMiles:null,
+      vehicleId:a.vehicleId||"",
+      // distMiles is the pre-split shared value; seed both legs from it so old
+      // activities keep the number they had, then each leg diverges on its own.
+      // A legacy 0 is dropped rather than inherited: one field forced the same
+      // number on both legs, so a drop-off starting at the activity measured
+      // zero and silently zeroed the drive home too. Nothing is lost — a leg
+      // with the same place at both ends now works out zero by itself.
+      distDrop:num(a.distDrop!=null?a.distDrop:(a.distMiles||null)),
+      distPick:num(a.distPick!=null?a.distPick:(a.distMiles||null)),
+      distMiles:(a.distMiles===0||a.distMiles)?+a.distMiles:null,
       tollEach:(a.tollEach!=null&&isFinite(+a.tollEach)&&+a.tollEach>0)?+a.tollEach:null,
       except:normExcept(a.except, kidIds), notes:a.notes||"" };
   }):[];
@@ -1829,7 +1848,7 @@ function activityCard(a, occ, iso){
   let distLine="";
   if(dropMi!=null || pickMi!=null){
     const parts=[]; if(dropMi!=null) parts.push(`⬇ ${dropMi}mi`); if(pickMi!=null) parts.push(`⬆ ${pickMi}mi`);
-    const est=(a.distMiles==null)?" (auto)":"";
+    const est=(a.distDrop==null&&a.distPick==null)?" (auto)":"";
     distLine=`<div class="vehline">📏 ${parts.join(" · ")}${est}</div>`;
   }
   const cl=activityCostLine(a,iso); const v0=effVehicle(a,routeDrv);
@@ -1868,7 +1887,8 @@ function driverTaskCard(it){
   const route=(origId||destId)?`<div class="tmeta">${esc(placeName(origId)||"—")} → <b>${esc(placeName(destId)||"—")}</b></div>`:"";
   const legM=legInfo(a, drop?"drop":"pick", iso);
   const em=(legM&&legM.miles!=null)? legM.miles : effectiveMiles(a);
-  const distLine=em>0?`<div class="vehline">📏 ${em} mi one-way${a.distMiles==null?" (auto)":""}</div>`:"";
+  const manualForLeg=drop?a.distDrop:a.distPick;
+  const distLine=em>0?`<div class="vehline">📏 ${em} mi one-way${manualForLeg==null?" (auto)":""}</div>`:"";
   const cl=legCostLine(a, drop?"drop":"pick", iso); const vObj=effVehicle(a,driverId);
   const vehFallback=(!cl&&vObj)?`<div class="vehline">🚗 ${esc(vObj.name)}${vObj.mpg?` · ${vObj.mpg} mpg`:""}</div>`:"";
   const url=dirUrl(origAddr,destAddr);
@@ -1971,7 +1991,8 @@ function openAct(id, iso){
   fillPlaceSelect(document.getElementById("fDropFrom"), a?a.dropFromId:"", "home");
   fillPlaceSelect(document.getElementById("fPickTo"), a?a.pickToId:"", "home");
   fillVehSelect(document.getElementById("fVeh"), a?a.vehicleId:"");
-  document.getElementById("fDist").value=(a&&a.distMiles!=null)?a.distMiles:"";
+  document.getElementById("fDist").value=(a&&a.distDrop!=null)?a.distDrop:"";
+  document.getElementById("fDistPick").value=(a&&a.distPick!=null)?a.distPick:"";
   document.getElementById("fToll").value=(a&&a.tollEach!=null)?a.tollEach:"";
   document.getElementById("fTollStatus").textContent="";
   updateFuelHint(); refreshAutoDistHint();
@@ -2102,10 +2123,11 @@ function modalMiles(){
   return 0;
 }
 function modalAct(){
-  const m=val("fDist").trim();
+  const rd=id=>{ const s=val(id).trim(); return s===""?null:(isFinite(+s)&&+s>=0?+s:null); };
+  const dd=rd("fDist");
   return { trans:document.getElementById("fTrans").checked, placeId:val("fPlace"),
     dropId:val("fDrop"), pickId:val("fPick"), dropFromId:val("fDropFrom"), pickToId:val("fPickTo"),
-    vehicleId:val("fVeh"), distMiles: m===""?null:(+m||0),
+    vehicleId:val("fVeh"), distDrop:dd, distPick:rd("fDistPick"), distMiles:dd,
     tollEach:(function(){ const t=val("fToll").trim().replace(/^\$/,"");
       return t===""?null:(isFinite(+t)&&+t>0?+t:null); })() };
 }
@@ -2167,21 +2189,42 @@ async function autoFillToll(){
   }catch(e){ say(tollErrText((e&&e.message)||"error")+exemptNote); toast("Toll estimate failed"); }
   btn.disabled=false; btn.textContent=old;
 }
-async function autoFillDistance(){
+/* The addresses for ONE leg as currently set in the modal, in the direction it
+   is driven. Previously a single "representative" pair stood in for both legs,
+   which measured the wrong journey whenever the two ends differed — and on a
+   drop-off that starts at the activity it measured a zero-mile trip. */
+function modalLegAddrs(side){
+  const drop=val("fDrop"), pick=val("fPick");
+  const drvId=side==="drop"?drop:pick;
+  if(!drvId||isNoLeg(drvId)) return null;
+  let homeId=side==="drop"? (val("fDropFrom")||driverHomeId(drvId)) : (val("fPickTo")||driverHomeId(drvId));
+  if(!homeId) homeId=side==="drop"? val("fPickTo") : val("fDropFrom");
+  const homeAddr=placeAddr(homeId), placeA=placeAddr(val("fPlace"));
+  if(!homeAddr||!placeA) return null;
+  return side==="drop"? {oAddr:homeAddr,dAddr:placeA} : {oAddr:placeA,dAddr:homeAddr};
+}
+async function autoFillLeg(side){
+  const fieldId=side==="drop"?"fDist":"fDistPick", btnId=side==="drop"?"fAutoBtn":"fAutoBtnPick";
+  const ra=modalLegAddrs(side);
+  if(!ra){ toast("Set this leg's driver, its start/end place and the activity address first"); return; }
+  // identical ends is a real answer — no request needed, and asking would return 0 anyway
+  if(normAddr(ra.oAddr)===normAddr(ra.dAddr)){
+    document.getElementById(fieldId).value=0; updateFuelHint(); refreshAutoDistHint();
+    toast("Same place at both ends — 0 miles"); return;
+  }
   if(!mapsKey()){ toast("Add your Google Maps key in Setup first"); openManage(); return; }
-  const ra=modalRepAddrs();
-  if(!ra){ toast("Need a driver with a home address and a place with an address"); return; }
-  const btn=document.getElementById("fAutoBtn"); const old=btn.textContent; btn.disabled=true; btn.textContent="…";
+  const btn=document.getElementById(btnId); const old=btn.textContent; btn.disabled=true; btn.textContent="…";
   try{
     let m=cachedMiles(ra.oAddr,ra.dAddr);
     if(m==null || cachedMins(ra.oAddr,ra.dAddr)==null){
       m=storeLeg(ra.oAddr,ra.dAddr, await gmapsDistanceMiles(ra.oAddr,ra.dAddr)); saveLocal(); schedulePush(); }
-    document.getElementById("fDist").value=m; updateFuelHint(); refreshAutoDistHint();
+    document.getElementById(fieldId).value=m; updateFuelHint(); refreshAutoDistHint();
     const mn=cachedMins(ra.oAddr,ra.dAddr);
-    toast("Driving distance: "+m+" mi"+(mn!=null?" · "+mn+" min":""));
+    toast((side==="drop"?"Drop-off":"Pick-up")+": "+m+" mi"+(mn!=null?" · "+mn+" min":""));
   }catch(e){ toast("Couldn't get distance ("+(e.message||"error")+")"); }
   btn.disabled=false; btn.textContent=old;
 }
+const autoFillDistance=()=>autoFillLeg("drop");
 function showNewPlace(){ document.getElementById("fNewPlace").style.display="";
   setTimeout(()=>document.getElementById("fNewPlaceName").focus(),30); }
 function hideNewPlace(){ document.getElementById("fNewPlace").style.display="none";
@@ -2214,8 +2257,10 @@ function saveAct(){
     endDate=document.getElementById("fEndDate").value||"";
     if(startDate&&endDate&&endDate<startDate){ toast("End date is before the start date"); return; }
   }
-  const distRaw=document.getElementById("fDist").value.trim();
-  const distMiles=distRaw===""?null:(isFinite(+distRaw)&&+distRaw>=0?+distRaw:null);
+  const rd=v=>{ const s=v.trim(); return s===""?null:(isFinite(+s)&&+s>=0?+s:null); };
+  const distDrop=rd(document.getElementById("fDist").value);
+  const distPick=rd(document.getElementById("fDistPick").value);
+  const distMiles=distDrop;   // kept for the dashboard, which reads the drop leg
   const tollRaw=document.getElementById("fToll").value.trim().replace(/^\$/,"");
   const tollEach=tollRaw===""?null:(isFinite(+tollRaw)&&+tollRaw>0?+tollRaw:null);
   if(!ui.editKidIds.length){ toast("Pick at least one child"); return; }
@@ -2262,7 +2307,7 @@ function saveAct(){
     trans:document.getElementById("fTrans").checked,
     dropId:document.getElementById("fDrop").value, pickId:document.getElementById("fPick").value,
     dropFromId:document.getElementById("fDropFrom").value, pickToId:document.getElementById("fPickTo").value,
-    vehicleId:document.getElementById("fVeh").value, distMiles, tollEach, except:normExcept(except),
+    vehicleId:document.getElementById("fVeh").value, distDrop, distPick, distMiles, tollEach, except:normExcept(except),
     notes:document.getElementById("fNotes").value.trim() };
   if(start<state.dayStart) state.dayStart=Math.floor(start/60)*60;
   if(end>state.dayEnd) state.dayEnd=Math.ceil(end/60)*60;
@@ -2270,9 +2315,24 @@ function saveAct(){
   if(ui.editingId){ saved=state.acts.find(x=>x.id===ui.editingId); Object.assign(saved,rec); }
   else { saved=Object.assign({id:rid("a")},rec); state.acts.push(saved); }
   hideOverlay("ovAct"); commit();
-  // auto-fill driving distance in the background if a maps key is set and none is on file
-  if(mapsKey() && saved.distMiles==null && repAddrs(saved) && autoMilesFor(saved)==null){
-    computeDistanceFor(saved).then(m=>{ if(m!=null) render(); }).catch(()=>{});
+  // Warm the cache for whichever legs still have no distance. Each leg is looked
+  // up in its own direction, so a drop-off and a pick-up with different ends both
+  // get measured rather than sharing one representative journey.
+  if(mapsKey()){
+    ["drop","pick"].forEach(side=>{
+      const manual=side==="drop"?saved.distDrop:saved.distPick;
+      if(manual!=null) return;
+      const l=legInfo(saved, side, "");
+      if(l && l.miles!=null) return;                  // already known (or same-place zero)
+      const drvId=side==="drop"?saved.dropId:saved.pickId;
+      if(!drvId||isNoLeg(drvId)) return;
+      let homeId=side==="drop"?(saved.dropFromId||driverHomeId(drvId)):(saved.pickToId||driverHomeId(drvId));
+      if(!homeId) homeId=side==="drop"?saved.pickToId:saved.dropFromId;
+      const homeA=placeAddr(homeId), placeA=placeAddr(saved.placeId);
+      if(!homeA||!placeA||normAddr(homeA)===normAddr(placeA)) return;
+      const o=side==="drop"?homeA:placeA, d=side==="drop"?placeA:homeA;
+      gmapsDistanceMiles(o,d).then(r=>{ storeLeg(o,d,r); saveLocal(); schedulePush(); render(); }).catch(()=>{});
+    });
   }
 }
 function deleteAct(){ if(!ui.editingId) return;
@@ -2476,7 +2536,8 @@ function wire(){
   document.getElementById("fVeh").onchange=updateFuelHint;
   document.getElementById("fDist").oninput=updateFuelHint;
   document.getElementById("fToll").oninput=updateFuelHint;
-  document.getElementById("fAutoBtn").onclick=autoFillDistance;
+  document.getElementById("fAutoBtn").onclick=()=>autoFillLeg("drop");
+  document.getElementById("fAutoBtnPick").onclick=()=>autoFillLeg("pick");
   document.getElementById("fTollAuto").onclick=autoFillToll;
   document.getElementById("occSkip").onchange=e=>{
     document.getElementById("occTimes").style.display=e.target.checked?"none":"";
