@@ -407,7 +407,8 @@
         </div>
         <div class="field">
           <label>🛣 Tolls, one way ($)</label>
-          <input type="text" inputmode="decimal" id="fToll" placeholder="e.g. 1.75 — leave blank if none" autocomplete="off">
+          <div class="selrow"><input type="text" inputmode="decimal" id="fToll" placeholder="e.g. 1.75 — leave blank if none" autocomplete="off"><button type="button" class="btn sm" id="fTollAuto" title="Ask Google for a toll estimate">🛣 Estimate</button></div>
+          <div class="hint" id="fTollStatus"></div>
           <div class="hint" id="fTollHint">Charged once per crossing. Each ride is there and back, so this is counted twice per driver — and twice again if a second driver does the other leg.</div>
         </div>
         <div class="fuelhint" id="fFuelHint" style="display:none"></div>
@@ -504,6 +505,10 @@
           <span class="hint" id="mapsStatus"></span>
         </div>
         <div class="hint" style="margin-top:8px">Enable <b>Maps JavaScript API</b> + <b>Distance Matrix API</b> in Google Cloud, restrict the key to your site, then paste it here. Your key stays on this device — never shared or synced; only the resulting mileage is saved. <a href="https://developers.google.com/maps/documentation/javascript/get-api-key" target="_blank" rel="noopener">Get a key →</a></div>
+        <div class="field" style="margin-top:12px"><label>🛣 Your toll pass</label>
+          <select id="tollPassSel"></select>
+          <div class="hint">Used when estimating tolls — pass holders usually pay less than the cash rate, so this changes the number. Toll estimates also need the <b>Routes API</b> enabled, and Google bills those requests at a higher rate than distances, so they only run when you press <b>🛣 Estimate</b> on an activity.</div>
+        </div>
       </div>
     </div>
     <div class="foot"><div class="spacer"></div><button class="btn primary" id="mDone">Done</button></div>
@@ -572,7 +577,7 @@ const LS_KEY = "familySchedule.data." + SCHED_ID;
 let state = defaultState();
 function defaultState(){
   return { title:"Our Family", buffer:15, dayStart:390, dayEnd:1320, gasPrice:3.20, dieselPrice:3.60,
-           arriveEarly:15,
+           arriveEarly:15, tollPass:"",
            kids:[], drivers:[], places:[], vehicles:[], acts:[], distCache:{}, timeCache:{}, updatedAt:0 };
 }
 /* Phones start in Agenda — the week grid needs sideways scrolling to read, the
@@ -1011,6 +1016,62 @@ function loadGMaps(){
 }
 window.gm_authFailure=function(){ gmapsPromise=null; toast("Google Maps rejected the key — check it and its restrictions"); };
 /* Resolves {miles, mins} — the duration is what powers "leave by". */
+/* Toll estimates come from the Routes library, which is a different (and more
+   expensive) product than the Distance Matrix call above — so it only ever runs
+   when the user presses the button, never as part of a bulk recalculation.
+   Loaded on demand via importLibrary so the distance path is untouched. */
+const TOLL_PASSES=[
+  ["","No pass — cash / toll-by-plate rate"],
+  ["US_FL_SUNPASS","SunPass (Florida)"],
+  ["US_FL_SUNPASS_PRO","SunPass Pro (Florida)"],
+  ["US_FL_EPASS","E-PASS (Florida)"],
+  ["US_FL_LEEWAY","LeeWay (Florida)"],
+  ["US_FL_GIBA_TOLL_PASS","GIBA Toll Pass (Florida)"],
+  ["US_FL_BOB_SIKES_TOLL_BRIDGE_PASS","Bob Sikes Toll Bridge Pass (Florida)"],
+  ["US_FL_DUNES_COMMUNITY_DEVELOPMENT_DISTRICT_EXPRESSCARD","Dunes ExpressCard (Florida)"]
+];
+function emissionFor(fuel){
+  if(fuel==="Diesel") return "DIESEL";
+  if(fuel==="Electric") return "ELECTRIC";
+  if(fuel==="Hybrid"||fuel==="Plug-in Hybrid") return "HYBRID";
+  return "GASOLINE";
+}
+/* Money is {units:"4", nanos:400000000} = $4.40 */
+function moneyToNum(m){
+  if(!m) return null;
+  const u=Number(m.units||0), n=Number(m.nanos||0)/1e9;
+  return isFinite(u+n)? u+n : null;
+}
+/* Resolves to {toll:Number} — toll 0 means "route has no tolls", which is a real
+   answer, not a failure. Rejects with a code the caller turns into plain words. */
+function gmapsTollOneWay(oAddr, dAddr, fuel){
+  return loadGMaps().then(async g=>{
+    if(!g.maps.importLibrary) throw new Error("no-importlibrary");
+    let lib;
+    try{ lib=await g.maps.importLibrary("routes"); }
+    catch(e){ throw new Error("no-routes-library"); }
+    const Route=lib&&lib.Route;
+    if(!Route||!Route.computeRoutes) throw new Error("no-route-class");
+    const req={
+      origin:oAddr, destination:dAddr, travelMode:"DRIVING",
+      extraComputations:["TOLLS"],
+      routeModifiers:{ vehicleInfo:{ emissionType:emissionFor(fuel) } },
+      fields:["travelAdvisory","distanceMeters"]
+    };
+    const pass=state.tollPass||"";
+    if(pass) req.routeModifiers.tollPasses=[pass];
+    const resp=await Route.computeRoutes(req);
+    const routes=(resp&&resp.routes)||(Array.isArray(resp)?resp:[]);
+    if(!routes.length) throw new Error("no-route");
+    const info=routes[0].travelAdvisory && routes[0].travelAdvisory.tollInfo;
+    const prices=(info&&info.estimatedPrice)||[];
+    if(!prices.length) return { toll:0 };          // genuinely a toll-free route
+    const usd=prices.find(p=>p.currencyCode==="USD")||prices[0];
+    const v=moneyToNum(usd);
+    if(v==null) throw new Error("bad-price");
+    return { toll:v, currency:usd.currencyCode||"USD" };
+  });
+}
 function gmapsDistanceMiles(oAddr,dAddr){
   return loadGMaps().then(g=> new Promise((res,rej)=>{
     const svc=new g.maps.DistanceMatrixService();
@@ -1377,6 +1438,7 @@ function normalize(s){
     gasPrice:(s.gasPrice!=null&&isFinite(+s.gasPrice))?+s.gasPrice:d.gasPrice,
     dieselPrice:(s.dieselPrice!=null&&isFinite(+s.dieselPrice))?+s.dieselPrice:d.dieselPrice,
     arriveEarly:(s.arriveEarly!=null&&isFinite(+s.arriveEarly))?clamp(+s.arriveEarly,0,120):d.arriveEarly,
+    tollPass:TOLL_PASSES.some(p=>p[0]===s.tollPass)?s.tollPass:"",   // reject anything Google wouldn't accept
     kids, drivers, places, vehicles, acts,
     distCache:(s.distCache&&typeof s.distCache==="object")?s.distCache:{},
     timeCache:(s.timeCache&&typeof s.timeCache==="object")?s.timeCache:{}, updatedAt:s.updatedAt||0 };
@@ -1906,6 +1968,7 @@ function openAct(id, iso){
   fillVehSelect(document.getElementById("fVeh"), a?a.vehicleId:"");
   document.getElementById("fDist").value=(a&&a.distMiles!=null)?a.distMiles:"";
   document.getElementById("fToll").value=(a&&a.tollEach!=null)?a.tollEach:"";
+  document.getElementById("fTollStatus").textContent="";
   updateFuelHint(); refreshAutoDistHint();
   document.getElementById("fNotes").value=a?a.notes:"";
   document.getElementById("fDelete").style.display=a?"":"none";
@@ -2057,6 +2120,48 @@ function refreshAutoDistHint(){
   const m=cachedMiles(ra.oAddr,ra.dAddr);
   el.textContent = m!=null ? ("On file: "+m+" mi driving") : "Tap Auto to calculate.";
 }
+/* Turns a thrown code into something a parent can act on. The Routes library is
+   a separate API that has to be switched on in Cloud Console, and that is by far
+   the most likely reason this fails, so it gets named explicitly. */
+function tollErrText(msg){
+  if(/no-key/.test(msg)) return "Add your Google Maps key in Setup first.";
+  if(/no-routes-library|no-route-class|no-importlibrary/.test(msg))
+    return "Your Maps key can't load the Routes library. Enable the Routes API in Google Cloud Console, then try again.";
+  if(/REQUEST_DENIED|PERMISSION|denied|403/i.test(msg))
+    return "Google refused the request — enable the Routes API for this key, and check the key's website restriction allows this site.";
+  if(/no-route/.test(msg)) return "Google couldn't find a driving route between those addresses.";
+  if(/OVER_QUERY_LIMIT|quota|429/i.test(msg)) return "Over the query limit for this key right now — try again later.";
+  return "Couldn't get an estimate — Google said \""+msg+"\".";
+}
+async function autoFillToll(){
+  const btn=document.getElementById("fTollAuto"), st=document.getElementById("fTollStatus");
+  const say=m=>{ if(st) st.textContent=m; };
+  if(!mapsKey()){ say(tollErrText("no-key")); toast("Add your Google Maps key first"); openManage(); return; }
+  const ra=modalRepAddrs();
+  if(!ra){ say("Set the driver's home and the activity's address first."); return; }
+  const cur=val("fToll").trim();
+  if(cur!=="" && !confirm("Replace the toll amount you entered ("+cur+") with Google's estimate?")) return;
+  const v=vehById(val("fVeh")) || (function(){ const d=drvById(val("fDrop")||val("fPick")); return d?vehById(d.usualVehicleId):null; })();
+  // carried through and appended, not shown now — the result message would
+  // otherwise overwrite it and the exemption would go unmentioned
+  const exemptNote=(v&&v.tollExempt)? " Note: "+v.name+" is marked toll-exempt, so this activity won't be charged it." : "";
+  btn.disabled=true; const old=btn.textContent; btn.textContent="…";
+  try{
+    const r=await gmapsTollOneWay(ra.oAddr, ra.dAddr, v?v.fuel:"Gas");
+    if(r.toll>0){
+      document.getElementById("fToll").value=(Math.round(r.toll*100)/100);
+      const pass=state.tollPass? (TOLL_PASSES.find(p=>p[0]===state.tollPass)||["",""])[1] : "no pass";
+      say("Google estimates "+money(r.toll)+" one way ("+pass+"). Edit it if your route differs."+exemptNote);
+      toast("Toll estimate added");
+    }else{
+      document.getElementById("fToll").value="";
+      say("Google found no tolls on that route.");
+      toast("No tolls on this route");
+    }
+    updateFuelHint();
+  }catch(e){ say(tollErrText((e&&e.message)||"error")+exemptNote); toast("Toll estimate failed"); }
+  btn.disabled=false; btn.textContent=old;
+}
 async function autoFillDistance(){
   if(!mapsKey()){ toast("Add your Google Maps key in Setup first"); openManage(); return; }
   const ra=modalRepAddrs();
@@ -2169,7 +2274,11 @@ function deleteAct(){ if(!ui.editingId) return;
   state.acts=state.acts.filter(a=>a.id!==ui.editingId); hideOverlay("ovAct"); commit(); }
 
 /* ================= SETUP MODAL ================= */
-function openManage(){ renderManage(); document.getElementById("mapsKeyInput").value=mapsKey();
+function openManage(){ renderManage();
+  const tp=document.getElementById("tollPassSel");
+  tp.innerHTML=TOLL_PASSES.map(([v,l])=>`<option value="${v}">${esc(l)}</option>`).join("");
+  tp.value=state.tollPass||"";
+  document.getElementById("mapsKeyInput").value=mapsKey();
   document.getElementById("mapsStatus").textContent=mapsKey()?"Key saved on this device ✓":"";
   document.getElementById("gasPriceInput").value=state.gasPrice!=null?state.gasPrice:"";
   document.getElementById("dieselPriceInput").value=state.dieselPrice!=null?state.dieselPrice:"";
@@ -2363,6 +2472,7 @@ function wire(){
   document.getElementById("fDist").oninput=updateFuelHint;
   document.getElementById("fToll").oninput=updateFuelHint;
   document.getElementById("fAutoBtn").onclick=autoFillDistance;
+  document.getElementById("fTollAuto").onclick=autoFillToll;
   document.getElementById("occSkip").onchange=e=>{
     document.getElementById("occTimes").style.display=e.target.checked?"none":"";
     document.getElementById("occStatus").textContent=e.target.checked?"Cancelled on this date.":"";
@@ -2385,6 +2495,7 @@ function wire(){
     const st=document.getElementById("mapsStatus"); if(st) st.textContent=k?"Key saved on this device ✓":""; };
   document.getElementById("fTBD").onchange=()=>{ applyTBD(); applyOccSetTime(); };
   document.getElementById("occSetTime").onchange=applyOccSetTime;
+  document.getElementById("tollPassSel").onchange=e=>{ state.tollPass=e.target.value; commit(); };
   document.getElementById("mapsCompute").onclick=computeAllDistances;
   document.getElementById("mapsRefreshBoth").onclick=refreshBothDirections;
   document.getElementById("snapNow").onclick=async()=>{
