@@ -415,7 +415,7 @@
           <label>🛣 Tolls, one way ($)</label>
           <div class="selrow"><input type="text" inputmode="decimal" id="fToll" placeholder="e.g. 1.75 — leave blank if none" autocomplete="off"><button type="button" class="btn sm" id="fTollAuto" title="Ask Google for a toll estimate">🛣 Estimate</button></div>
           <div class="hint" id="fTollStatus"></div>
-          <div class="hint" id="fTollHint">Charged once per crossing. Each ride is there and back, so this is counted twice per driver — and twice again if a second driver does the other leg.</div>
+          <div class="hint" id="fTollHint">Just type what you pay — <b>Estimate</b> is optional, and only works if you've enabled the Routes API. Charged once per crossing, so a there-and-back ride counts it twice, and twice again if a second driver does the other leg. A leg you don't actually drive isn't charged.</div>
         </div>
         <div class="fuelhint" id="fFuelHint" style="display:none"></div>
         <div class="hint">Drop-off = there by start time. Pick-up = collected at end. “Leaves from / ends at” default to the driver’s home.</div>
@@ -822,6 +822,10 @@ function legToll(act, side, iso){
   const t=+act.tollEach; if(!isFinite(t)||t<=0) return 0;
   const l=legInfo(act, side, iso); if(!l) return 0;   // no leg ⇒ no crossings
   if(l.v && l.v.tollExempt) return 0;                 // this car doesn't pay
+  // A leg of exactly zero miles isn't driven — dropping a child off where they
+  // already are. No drive, no toll booth. (null means distance unknown, not
+  // zero, so those still charge.)
+  if(l.miles===0) return 0;
   return t*2;
 }
 /* What the toll would have been but for the vehicle's exemption. Kept separate
@@ -829,7 +833,7 @@ function legToll(act, side, iso){
    than just silently missing. */
 function legTollWaived(act, side, iso){
   const t=+act.tollEach; if(!isFinite(t)||t<=0) return 0;
-  const l=legInfo(act, side, iso); if(!l) return 0;
+  const l=legInfo(act, side, iso); if(!l || l.miles===0) return 0;
   return (l.v && l.v.tollExempt)? t*2 : 0;
 }
 /* On a long trip, suggest a cheaper option: prefer an EV ("no gas"),
@@ -2180,6 +2184,11 @@ async function autoFillToll(){
       const pass=state.tollPass? (TOLL_PASSES.find(p=>p[0]===state.tollPass)||["",""])[1] : "no pass";
       say("Google estimates "+money(r.toll)+" one way ("+pass+"). Edit it if your route differs."+exemptNote);
       toast("Toll estimate added");
+    }else if(cur!==""){
+      // "no tolls found" is not permission to delete a figure the user typed —
+      // they agreed to a replacement, and there is nothing to replace it with
+      say("Google found no tolls on that route, so your "+cur+" has been kept. Clear the box yourself if it really is toll-free.");
+      toast("No tolls found — your amount kept");
     }else{
       document.getElementById("fToll").value="";
       say("Google found no tolls on that route.");
