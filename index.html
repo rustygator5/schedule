@@ -397,6 +397,8 @@
           <div class="field"><label>Drop-off leaves from</label><select id="fDropFrom"></select></div>
           <div class="field"><label>Pick-up ends at</label><select id="fPickTo"></select></div>
         </div>
+        <label class="checkline"><input type="checkbox" id="fStay"> ⏳ Driver stays through the activity</label>
+        <div class="hint" id="fStayHint">One round trip instead of two — they don't drive home and back again. Halves the miles, fuel and tolls, and flags anything else they'd be booked for while they're waiting. Needs the same person on both legs.</div>
         <div class="field"><label>Vehicle</label><select id="fVeh"></select></div>
         <div class="row2">
           <div class="field">
@@ -675,6 +677,19 @@ function occDropId(a, iso){ const ex=iso?(a.except||{})[iso]:null;
 function occPickId(a, iso){ const ex=iso?(a.except||{})[iso]:null;
   return (ex && typeof ex.pickId==="string")? ex.pickId : a.pickId; }
 function occDriverId(a, side, iso){ return side==="drop"? occDropId(a,iso) : occPickId(a,iso); }
+/* "Stays" = the driver drops the child off, waits through the activity and
+   drives home with them. That is ONE round trip, not two: they never drive
+   home in between. Only holds when the same person covers both legs — if two
+   different people drive, each makes their own out-and-back regardless. */
+function stayApplies(a, iso){
+  if(!a || !a.stay) return false;
+  const d=occDropId(a,iso), p=occPickId(a,iso);
+  return !!d && d===p && !isNoLeg(d);
+}
+/* How many one-way drives this leg accounts for. Normally 2 (out and back);
+   when the driver waits, each leg is a single one-way drive — out on the
+   drop, home on the pick — so the pair still totals one round trip. */
+function legOneWays(a, side, iso){ return stayApplies(a,iso)? 1 : 2; }
 /* Which children actually go on a given date — kidsOut lists the ones sitting
    it out, so the carpool keeps running for whoever's left. */
 function occKidsOut(a, iso){ const ex=iso?(a.except||{})[iso]:null;
@@ -813,8 +828,11 @@ function effVehicle(act, driverId){
     : (function(){ const d=drvById(act.dropId||act.pickId); return d?d.usualVehicleId:""; })());
   return vId ? vehById(vId) : null;
 }
-function roundTrip(v, miles){ if(!v||!v.mpg||!miles) return null;
-  const gal=(miles*2)/v.mpg, p=priceForFuel(v.fuel); return {gal, price:p, cost: p? gal*p : null}; }
+/* Fuel for a given number of miles actually driven. */
+function fuelFor(v, tripMiles){ if(!v||!v.mpg||!tripMiles) return null;
+  const gal=tripMiles/v.mpg, p=priceForFuel(v.fuel); return {gal, price:p, cost: p? gal*p : null}; }
+/* Convenience for the common out-and-back case (vehicle comparisons). */
+function roundTrip(v, miles){ return fuelFor(v, miles*2); }
 /* Tolls are charged per one-way crossing and are independent of the vehicle —
    an electric car pays the same toll. Each leg is a there-and-back run for the
    driver, so one leg crosses twice: out and home. */
@@ -826,7 +844,7 @@ function legToll(act, side, iso){
   // already are. No drive, no toll booth. (null means distance unknown, not
   // zero, so those still charge.)
   if(l.miles===0) return 0;
-  return t*2;
+  return t*l.oneWays;   // one crossing per one-way drive
 }
 /* What the toll would have been but for the vehicle's exemption. Kept separate
    so a $0 toll on an activity that clearly has one can be explained rather
@@ -834,7 +852,7 @@ function legToll(act, side, iso){
 function legTollWaived(act, side, iso){
   const t=+act.tollEach; if(!isFinite(t)||t<=0) return 0;
   const l=legInfo(act, side, iso); if(!l || l.miles===0) return 0;
-  return (l.v && l.v.tollExempt)? t*2 : 0;
+  return (l.v && l.v.tollExempt)? t*l.oneWays : 0;
 }
 /* On a long trip, suggest a cheaper option: prefer an EV ("no gas"),
    else the lowest gas-cost vehicle in the fleet. Returns a plain string or "". */
@@ -888,7 +906,9 @@ function legInfo(act, side, iso){
     else miles = cachedMiles(placeA, homeAddr) || cachedMiles(homeAddr, placeA);
   }
   const v = effVehicle(act, drvId);
-  const rt = (miles!=null && v)? roundTrip(v, miles) : null;
+  const oneWays = legOneWays(act, side, iso);
+  const tripMiles = miles!=null? miles*oneWays : null;   // miles actually driven for this leg
+  const rt = (tripMiles!=null && v)? fuelFor(v, tripMiles) : null;
   let dmMins=null, dmEst=false;
   if(side==="drop"){
     dmMins = cachedMins(homeAddr, placeA) || cachedMins(placeA, homeAddr);
@@ -899,7 +919,8 @@ function legInfo(act, side, iso){
     dmMins = Math.max(1, Math.round(miles/30*60));
     dmEst = true;
   }
-  return { side, drvId, miles, v, rt, driveMins:dmMins, driveEst:dmEst };
+  return { side, drvId, miles, tripMiles, oneWays, v, rt, driveMins:dmMins, driveEst:dmEst,
+           stays: stayApplies(act, iso) };
 }
 /* When this driver should pull out of the driveway: be at the door `arriveEarly`
    minutes before the kid needs to be there (or before pick-up time), minus the
@@ -910,6 +931,9 @@ function leaveByFor(act, side, occ, iso){
   // no known start/end means no honest "leave by" — the placeholder would read
   // as a real departure time, which is worse than showing nothing
   if(occ.tbd) return null;
+  // a driver who waited through the activity is already there — there is no
+  // journey to set off on, they simply leave when it ends
+  if(side==="pick" && stayApplies(act, iso)) return null;
   const target = side==="drop" ? occ.start : occ.end;
   const early = +state.arriveEarly||0;
   let mins = target - l.driveMins - early;
@@ -934,7 +958,8 @@ function activityEconomy(act, iso){
     if(l.v && !vehs.some(x=>x.id===l.v.id)) vehs.push(l.v); });
   const toll=legs.reduce((s,l)=>s+legToll(act,l.side,iso),0);
   const tollWaived=legs.reduce((s,l)=>s+legTollWaived(act,l.side,iso),0);
-  return { legs, trips:legs.length, cost:anyCost?cost:null, gal, vehs, toll, tollWaived,
+  return { legs, trips:legs.length, stays:stayApplies(act,iso),
+    cost:anyCost?cost:null, gal, vehs, toll, tollWaived,
     total:(anyCost||toll)? cost+toll : null };
 }
 /* Format an economy summary (vehicle names esc'd; HTML-safe). "" if nothing to show. */
@@ -964,7 +989,7 @@ function activitySavings(act, iso){
 }
 function activityCostLine(act, iso){
   const e=activityEconomy(act, iso); if(!e) return "";
-  const body=fmtEconomy(e.cost, e.gal, e.vehs, e.trips>1?"both trips":"round trip", e.toll, e.tollWaived);
+  const body=fmtEconomy(e.cost, e.gal, e.vehs, (e.trips>1&&!e.stays)?"both trips":"round trip", e.toll, e.tollWaived);
   if(!body) return "";
   const alt=activitySavings(act, iso);
   return `<div class="vehline">${body}${alt?` <span class="save">· ${esc(alt)}</span>`:""}</div>`;
@@ -1005,7 +1030,7 @@ function driverWeekTotals(){
       const l=legInfo(a,side,iso);
       const m=map.get(drvId) || {id:drvId, rides:0, miles:0, cost:0, toll:0, hasCost:false, hasMiles:false};
       m.rides++;
-      if(l && l.miles!=null){ m.miles += l.miles*2; m.hasMiles=true; }
+      if(l && l.tripMiles!=null){ m.miles += l.tripMiles; m.hasMiles=true; }
       if(l && l.rt && l.rt.cost!=null){ m.cost += l.rt.cost; m.hasCost=true; }
       const t=legToll(a,side,iso); if(t>0){ m.toll+=t; m.cost+=t; m.hasCost=true; }
       map.set(drvId,m);
@@ -1446,7 +1471,7 @@ function normalize(s){
       repeat:a.repeat==="once"?"once":"weekly",
       days, day:days[0],
       date:a.date||"", startDate:a.startDate||"", endDate:a.endDate||"",
-      start:a.start||960, end:a.end||1020, tbd:!!a.tbd, trans:a.trans!==false,
+      start:a.start||960, end:a.end||1020, tbd:!!a.tbd, trans:a.trans!==false, stay:!!a.stay,
       dropId:a.dropId||"", pickId:a.pickId||"", dropFromId:a.dropFromId||"", pickToId:a.pickToId||"",
       vehicleId:a.vehicleId||"",
       // distMiles is the pre-split shared value; seed both legs from it so old
@@ -1531,6 +1556,24 @@ function computeConflicts(weekStart){
           ids:[e.actId,f.actId]});
       }
     }
+    // 2b. A driver who waits through an activity is tied up for its whole
+    // length, not just the two moments at either end. Without this, a second
+    // run booked in the middle looks fine — the point-in-time checks above
+    // only ever see the drop-off and the pick-up.
+    const stuckSeen=new Set();
+    occs.forEach(o=>{ const a=o.a; if(!a.trans || !stayApplies(a,iso)) return;
+      const drv=occDropId(a,iso); if(!drv) return;
+      T.forEach(e=>{
+        if(e.actId===a.id || e.driverId!==drv) return;
+        if(e.t<=o.start || e.t>=o.end) return;          // outside the wait
+        const key=a.id+"|"+e.actId; if(stuckSeen.has(key)) return; stuckSeen.add(key);
+        out.push({sev:"danger",ic:"⏳",cat:"Driver is waiting elsewhere",
+          msg:drvName(drv)+" is staying at "+a.name+" "+dayLabel,
+          sub:"Waiting there "+label12(o.start)+"–"+label12(o.end)+", so can't "+verbText(e)+" at "+label12(e.t)+".",
+          ids:[a.id,e.actId]});
+      });
+    });
+
     // 3. Transport crunch
     const evs=T.slice().sort((a,b)=>a.t-b.t);
     const used=new Array(evs.length).fill(false);
@@ -1838,7 +1881,8 @@ function activityCard(a, occ, iso){
       :(d?`<span class="tpill">⬇ Drop-off <span class="who">${esc(drvName(d))}${dsw}</span></span>`:`<span class="tpill miss">⬇ Drop-off: none</span>`);
     const pk=isNoLeg(p)?`<span class="tpill none">⬆ ${legLabel("pick")}</span>`
       :(p?`<span class="tpill">⬆ Pick-up <span class="who">${esc(drvName(p))}${psw}</span></span>`:`<span class="tpill miss">⬆ Pick-up: none</span>`);
-    trans=`<div class="atrans">${dp}${pk}</div>`;
+    const stayPill=stayApplies(a,iso)?`<span class="tpill">⏳ Stays through</span>`:"";
+    trans=`<div class="atrans">${dp}${pk}${stayPill}</div>`;
   }else trans=`<div class="atrans"><span class="tpill">🏠 No ride needed</span></div>`;
   // with no drop-off leg, directions should start from whoever collects them
   const routeDrv=isNoLeg(occDropId(a,iso))? occPickId(a,iso) : occDropId(a,iso);
@@ -1885,8 +1929,11 @@ function driverTaskCard(it){
   const origAddr=placeAddr(origId), destAddr=placeAddr(destId);
   const verb=drop?`<span class="verb drop">Drop off</span>`:`<span class="verb pick">Pick up</span>`;
   const line=drop?`Get <b>${esc(actKidNames(a,iso))}</b> to <b>${esc(a.name)}</b>`:`Collect <b>${esc(actKidNames(a,iso))}</b> from <b>${esc(a.name)}</b>`;
+  const stays=stayApplies(a,iso);
   const when=occ.tbd? "🕐 Time not set yet"
-    : (drop?`Arrive by ${label12(occ.start)}`:`Ready at ${label12(occ.end)}`)
+    : (drop? `Arrive by ${label12(occ.start)}`+(stays?" · staying until "+label12(occ.end):"")
+           : (stays? `Head home at ${label12(occ.end)} — you're already there`
+                   : `Ready at ${label12(occ.end)}`))
       +(occ.moved?" ⏰ (moved)":"")+(occ.pinned?" 🕐 (set for this date)":"");
   const route=(origId||destId)?`<div class="tmeta">${esc(placeName(origId)||"—")} → <b>${esc(placeName(destId)||"—")}</b></div>`:"";
   const legM=legInfo(a, drop?"drop":"pick", iso);
@@ -1963,6 +2010,17 @@ function applyTBD(){
     el.disabled=on; el.style.opacity=on?".45":""; });
   document.getElementById("tbdHint").style.display=on?"":"none";
 }
+/* Staying only means anything when one person covers both legs, so say so
+   rather than letting the box sit ticked with no effect. */
+function applyStay(){
+  const el=document.getElementById("fStayHint"); if(!el) return;
+  const d=val("fDrop"), p=val("fPick");
+  const same=!!d && d===p && !isNoLeg(d);
+  const on=document.getElementById("fStay").checked;
+  el.innerHTML = (on && !same)
+    ? `<b style="color:var(--warn)">Not applied:</b> this needs the same driver on both the drop-off and the pick-up. Set both to one person, or leave this unticked.`
+    : `One round trip instead of two — they don't drive home and back again. Halves the miles, fuel and tolls, and flags anything else they'd be booked for while they're waiting. Needs the same person on both legs.`;
+}
 function applyRepeatUI(){
   const weekly=ui.editRepeat==="weekly";
   document.getElementById("fRepWeekly").classList.toggle("on",weekly);
@@ -1988,6 +2046,7 @@ function openAct(id, iso){
   document.getElementById("fStart").value=toHHMM(a?a.start:960);
   document.getElementById("fEnd").value=toHHMM(a?a.end:1020);
   document.getElementById("fTBD").checked=!!(a&&a.tbd); applyTBD();
+  document.getElementById("fStay").checked=!!(a&&a.stay); applyStay();
   const tr=a?a.trans:true;
   document.getElementById("fTrans").checked=tr; toggleTrans(tr);
   fillDriverSelect(document.getElementById("fDrop"), a?a.dropId:"", "drop");
@@ -2130,6 +2189,7 @@ function modalAct(){
   const rd=id=>{ const s=val(id).trim(); return s===""?null:(isFinite(+s)&&+s>=0?+s:null); };
   const dd=rd("fDist");
   return { trans:document.getElementById("fTrans").checked, placeId:val("fPlace"),
+    stay:document.getElementById("fStay").checked,
     dropId:val("fDrop"), pickId:val("fPick"), dropFromId:val("fDropFrom"), pickToId:val("fPickTo"),
     vehicleId:val("fVeh"), distDrop:dd, distPick:rd("fDistPick"), distMiles:dd,
     tollEach:(function(){ const t=val("fToll").trim().replace(/^\$/,"");
@@ -2139,7 +2199,7 @@ function updateFuelHint(){
   const el=document.getElementById("fFuelHint");
   const e=activityEconomy(modalAct());
   let txt="";
-  if(e){ txt=fmtEconomy(e.cost, e.gal, e.vehs, e.trips>1?"both trips":"round trip", e.toll, e.tollWaived);
+  if(e){ txt=fmtEconomy(e.cost, e.gal, e.vehs, (e.trips>1&&!e.stays)?"both trips":"round trip", e.toll, e.tollWaived);
     const alt=activitySavings(modalAct()); if(txt&&alt) txt+=" — "+esc(alt); }
   if(txt){ el.innerHTML=txt; el.style.display=""; } else el.style.display="none";
 }
@@ -2313,6 +2373,7 @@ function saveAct(){
     }});
   const rec={ kidIds:ui.editKidIds.slice(), name, placeId:document.getElementById("fPlace").value,
     repeat, days, day:days[0], date, startDate, endDate, start, end, tbd,
+    stay:document.getElementById("fStay").checked,
     trans:document.getElementById("fTrans").checked,
     dropId:document.getElementById("fDrop").value, pickId:document.getElementById("fPick").value,
     dropFromId:document.getElementById("fDropFrom").value, pickToId:document.getElementById("fPickTo").value,
@@ -2564,7 +2625,8 @@ function wire(){
     toast("All date changes cleared");
   };
   ["fDrop","fPick","fDropFrom","fPickTo","fPlace"].forEach(id=>{
-    document.getElementById(id).addEventListener("change",()=>{ updateFuelHint(); refreshAutoDistHint(); }); });
+    document.getElementById(id).addEventListener("change",()=>{ updateFuelHint(); refreshAutoDistHint(); applyStay(); }); });
+  document.getElementById("fStay").onchange=()=>{ applyStay(); updateFuelHint(); };
   // setup
   document.getElementById("mapsKeyInput").oninput=e=>{ const k=e.target.value.trim(); setMapsKey(k);
     const st=document.getElementById("mapsStatus"); if(st) st.textContent=k?"Key saved on this device ✓":""; };
