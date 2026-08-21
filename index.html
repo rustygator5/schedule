@@ -2019,7 +2019,7 @@ function applyStay(){
   const on=document.getElementById("fStay").checked;
   el.innerHTML = (on && !same)
     ? `<b style="color:var(--warn)">Not applied:</b> this needs the same driver on both the drop-off and the pick-up. Set both to one person, or leave this unticked.`
-    : `One round trip instead of two — they don't drive home and back again. Halves the miles, fuel and tolls, and flags anything else they'd be booked for while they're waiting. Needs the same person on both legs.`;
+    : `On by default. One round trip instead of two — they don't drive home and back again. Untick it if they drop off and drive away, which counts a second trip back to collect. Needs the same person on both legs.`;
 }
 function applyRepeatUI(){
   const weekly=ui.editRepeat==="weekly";
@@ -2046,7 +2046,9 @@ function openAct(id, iso){
   document.getElementById("fStart").value=toHHMM(a?a.start:960);
   document.getElementById("fEnd").value=toHHMM(a?a.end:1020);
   document.getElementById("fTBD").checked=!!(a&&a.tbd); applyTBD();
-  document.getElementById("fStay").checked=!!(a&&a.stay); applyStay();
+  // New activities assume the driver waits, since that is the usual pattern —
+  // existing ones keep whatever they were saved with.
+  document.getElementById("fStay").checked = a? !!a.stay : true; applyStay();
   const tr=a?a.trans:true;
   document.getElementById("fTrans").checked=tr; toggleTrans(tr);
   fillDriverSelect(document.getElementById("fDrop"), a?a.dropId:"", "drop");
